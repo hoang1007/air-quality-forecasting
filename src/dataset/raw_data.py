@@ -1,15 +1,13 @@
 import os
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Callable
 import pandas as pd
 from datetime import datetime
 
-from sklearn.metrics import r2_score
 
-
-def air_quality_train_data(root: str):
+def air_quality_train_data(root: str, fillnan_fn: Callable = None):
     '''
     Đọc dữ liệu `train` từ thư mục và trả về theo cấu trúc:
-    >>> input: dict
+    >>> input: dict {name: station}
     >>> ├─ station1: dict
     >>> │  ├─ location: tuple: (longitude, latitude)
     >>> │  ├─ timerange: tuple: (datetime, datetime)
@@ -20,52 +18,52 @@ def air_quality_train_data(root: str):
     >>> ├─ .../
     >>> output: dict: giống như input
     '''
-    location_map = _read_location_map(root)
-    r2_score
+    src_location_map = _read_location_map(os.path.join(root, "location_input.csv"))
+    target_location_map = _read_location_map(os.path.join(root, "location_output.csv"))
 
     return {
-        "input": _read_stations(os.path.join(root, "input"), location_map),
-        "output": _read_stations(os.path.join(root, "output"), location_map),
+        "input": _read_stations(os.path.join(root, "input"), src_location_map, fillnan_fn),
+        "output": _read_stations(os.path.join(root, "output"), target_location_map, fillnan_fn),
     }
 
-def air_quality_test_data(test_root: str, train_root: str):
+def air_quality_test_data(test_root: str, train_root: str, fillnan_fn: Callable = None):
     '''
     Đọc dữ liệu `test` từ thư mục và trả về theo cấu trúc:
     >>> input: list
     >>> ├─ 0/
-    >>> │  ├─ station1: dict
+    >>> │  ├─ station1: dict {name: station}
     >>> │  │  ├─ location: tuple (longitude, latitude)
     >>> │  │  ├─ timerange: tuple (datetime, datetime)
     >>> │  │  ├─ humidity: list of float
     >>> │  │  ├─ temperature: list of float
     >>> │  │  ├─ pm2.5: list of float
-    >>> │  ├─ station2: dict
+    >>> │  ├─ station2: dict {name: station}
     >>> │  ├─ .../
     >>> ├─ 1/
     >>> location_map/
     >>> ├─ station: dict {name: location}
 
     '''
-    train_location_map = _read_location_map(train_root)
+    train_location_map = _read_location_map(os.path.join(train_root, "location_input.csv"))
 
-    data = {"input": [], "location_map": _read_location_map(test_root)}
+    data = {"input": [], "location_map": _read_location_map(os.path.join(test_root, "location.csv"))}
     for dir in os.listdir(os.path.join(test_root, "input")):
         dir_path = os.path.join(test_root, "input", dir)
         if os.path.isdir(dir_path):
-            data["input"].append(_read_stations(dir_path, train_location_map))
+            data["input"].append(_read_stations(dir_path, train_location_map, fillnan_fn))
         else:
             raise ValueError("Invalid folder structure")
     
     return data    
 
 
-def _read_stations(parent_dir, location_map: Dict[str, Tuple[float, float]]):
+def _read_stations(parent_dir, location_map: Dict[str, Tuple[float, float]], fillnan_fn = None):
     stations = {}
 
     for file in os.listdir(parent_dir):
         filepath = os.path.join(parent_dir, file)
         if os.path.isfile(filepath):
-            stations.update(_read_station_data(filepath, location_map))
+            stations.update(_read_station_data(filepath, location_map, fillnan_fn))
         else:
             raise ValueError(
                 "The parent directory should not contain any subdirectories. Dir " + filepath)
@@ -73,11 +71,16 @@ def _read_stations(parent_dir, location_map: Dict[str, Tuple[float, float]]):
     return stations
 
 
-def _read_station_data(file_path, location_map: Dict[str, Tuple[float, float]]) -> Dict:
+def _read_station_data(file_path, location_map: Dict[str, Tuple[float, float]], fillnan_fn: Callable = None) -> Dict:
     with open(file_path, "r") as f:
         station_name = os.path.splitext(os.path.basename(file_path))[0]
         df = pd.read_csv(
             f, usecols=["timestamp", "PM2.5", "humidity", "temperature"])
+
+    if fillnan_fn is not None:
+        df["humidity"] = fillnan_fn(df["humidity"])
+        df["temperature"] = fillnan_fn(df["temperature"])
+        df["PM2.5"] = fillnan_fn(df["PM2.5"])
 
     start = datetime.strptime(df["timestamp"].iloc[0], "%d/%m/%Y %H:%M")
     end = datetime.strptime(df["timestamp"].iloc[-1], "%d/%m/%Y %H:%M")
@@ -101,8 +104,8 @@ def _read_station_data(file_path, location_map: Dict[str, Tuple[float, float]]) 
     }
 
 
-def _read_location_map(root):
-    with open(os.path.join(root, "location.csv"), "r") as f:
+def _read_location_map(loc_path: str):
+    with open(loc_path, "r") as f:
         location_df = pd.read_csv(f, index_col=False)
 
     return dict(zip(
@@ -111,7 +114,10 @@ def _read_location_map(root):
     ))
 
 if __name__ == "__main__":
-    train_data = air_quality_train_data("data/data-train")
+    def sample_fillnan(serie: pd.Series) -> pd.Series:
+        return serie.rolling(window=6).mean()
+
+    train_data = air_quality_train_data("data/data-train", sample_fillnan)
     test_data = air_quality_test_data("data/public-test", "data/data-train")
 
     print(train_data.keys())
