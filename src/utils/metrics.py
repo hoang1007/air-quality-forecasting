@@ -4,7 +4,7 @@ from pytorch_forecasting.metrics import MAE, MAPE, RMSE
 from pytorch_forecasting.metrics.base_metrics import MultiHorizonMetric
 
 
-class Metrics:
+class MultiMetrics:
     '''
     Tính các điểm đánh giá cho mô hình.
 
@@ -46,7 +46,7 @@ class R2(MultiHorizonMetric):
         y_pred = self.to_prediction(y_pred)
 
         rss = torch.pow(target - y_pred, 2)
-        tss = torch.pow(target - target.mean(dim=-1), 2)
+        tss = torch.pow(target - target.mean(dim=-1, keepdim=True), 2)
 
         return 1 - rss / (tss + 1e-8)
 
