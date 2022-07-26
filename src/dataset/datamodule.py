@@ -1,147 +1,237 @@
-from cmath import isnan
-from typing import Callable, Dict
+from typing import Callable, Dict, Tuple, Optional
 import os
-import torch
+from matplotlib.pyplot import fill
+import numpy as np
 import pandas as pd
-from torch.utils.data import Dataset, DataLoader
+import torch
+from torch.utils.data import Dataset, DataLoader, random_split
 from pytorch_lightning import LightningDataModule
 from dataset.raw_data import air_quality_train_data, air_quality_test_data
 
 
 class AirQualityDataset(Dataset):
-    def __init__(self, root: str, data_set: str = "train", fillnan_fn: Callable = None):
-        self.encoder_len = 24 * 7
-        self.predict_len = 24
+    def __init__(
+        self,
+        rootdir: str,
+        output_frame_size: int,
+        normalize_mean: Dict[str, float],
+        normalize_std: Dict[str, float],
+        data_set: str = "train",
+        fillnan_fn: Callable = None,
+    ):
+        self.input_frame_size = 168  # 24x7
+        self.output_frame_size = output_frame_size
+        self.normalize_mean = normalize_mean
+        self.normalize_std = normalize_std
         self.data_set = data_set
 
         if data_set == "train":
-            self.data = self._handle_training_data(
-                os.path.join(root, "data-train"),
-                fillnan_fn
+            self.data, self._data_len = self.preprocess_training_data(
+                os.path.join(rootdir, "data-train"),
+                fillnan_fn,
             )
         elif data_set == "test":
-            self.data = self._handle_testing_data(
-                os.path.join(root, "public-test"),
-                os.path.join(root, "data-train"),
-                fillnan_fn
+            self.data, self._data_len = self.preprocess_testing_data(
+                os.path.join(rootdir, "data-test"),
+                fillnan_fn,
             )
         else:
-            raise ValueError("Data must be either train or test. Got " + data_set)
+            raise ValueError(f"Unknown data set {self.data_set}")
 
     def __len__(self):
-        return self._len_data
-
-    def __getitem__(self, index):
-        if self.data_set == "train":
-            return self._get_training_item(index)
-        elif self.data_set == "test":
-            return self._get_testing_item(index)
-        else:
-            raise ValueError()
+        return self._data_len
     
-    def _handle_training_data(self, train_root: str, fillnan_fn: Callable = None):
-        raw_data = air_quality_train_data(train_root, fillnan_fn)
-        
-        data = {}
+    def __getitem__(self, idx):
+        if self.data_set == "train":
+            return self._get_training_item(idx)
+        elif self.data_set == "test":
+            return self._get_testing_item(idx)
+        else:
+            raise ValueError(f"Unknown data set {self.data_set}")
 
-        for key in raw_data:
-            feats = torch.tensor([])
-            locations = torch.tensor([])
+    def preprocess_training_data(self, train_root: str, fillnan_fn: Callable = None):
+        raw_data = air_quality_train_data(train_root)
 
-            for station in raw_data[key].items():
-                feat, loc = self._station_data_totensor(station)
+        X_feats = torch.tensor([])
+        X_loc = torch.tensor([])
 
-                feats = torch.cat((feats, feat), dim=0)
-                locations = torch.cat((locations, loc), dim=0)
-                    
+        for station in raw_data["input"].values():
+            feat, loc = self._preprocess_station_data(
+                station["data"], station["location"], fillnan_fn)
 
-            data[key] = {
-                "features": feats,
-                "locations": locations
-            }
-        
-        assert data["input"]["features"].size(1) == data["output"]["features"].size(1), "n_samples of input and output must be the same"
-        
-        # data["input"].shape == (n_stations, n_samples, n_features)
-        self._len_data = data["input"]["features"].size(1) - (self.encoder_len + self.predict_len)
-        
-        return data
+            X_feats = torch.cat((X_feats, feat.unsqueeze(0)), dim=0)
+            X_loc = torch.cat((X_loc, loc.unsqueeze(0)), dim=0)
+
+        y_feats = torch.tensor([])
+        y_loc = torch.tensor([])
+
+        for station in raw_data["output"].values():
+            feat, loc = self._preprocess_station_data(
+                station["data"], station["location"], fillnan_fn)
+
+            y_feats = torch.cat((y_feats, feat[:, -1].unsqueeze(0)), dim=0)
+            y_loc = torch.cat((y_loc, loc.unsqueeze(0)), dim=0)
+
+        # data_length = (num_timesteps - (input_frame_size + output_frame_size)) x n_target_stations
+        data_length = (X_feats.size(1) - (self.input_frame_size +
+                       self.output_frame_size)) * y_loc.size(0)
+
+        return {
+            "X_feats": X_feats,
+            "X_locs": X_loc,
+            "y_feats": y_feats,
+            "y_locs": y_loc,
+        }, data_length
 
     def _get_training_item(self, idx):
-        src_end_idx = idx + self.encoder_len
-        tar_end_idx = src_end_idx + self.predict_len
+        n_target_stations = self.data["y_locs"].size(0)
 
-        assert tar_end_idx <= len(self), "Index out of bounds"
-        
+        tar_station_dix = idx % n_target_stations
+        sample_idx = idx // n_target_stations
+
+        src_end_idx = sample_idx + self.input_frame_size
+        tar_end_idx = src_end_idx + self.output_frame_size
+
         return {
-            "src_loc": self.data["input"]["locations"],
-            "tar_loc": self.data["output"]["locations"],
-            "features": self.data["input"]["features"][:, idx : src_end_idx],
-            "target": self.data["output"]["features"][:, src_end_idx : tar_end_idx]
+            "features": self.data["X_feats"][:, sample_idx: src_end_idx],
+            "src_locs": self.data["X_locs"],
+            "tar_loc": self.data["y_locs"][tar_station_dix],
+            "target": self.data["y_feats"][tar_station_dix][src_end_idx: tar_end_idx]
         }
 
+    def preprocess_testing_data(self, test_root: str, train_root: str, fillnan_fn: Callable = None):
+        raw_data = air_quality_test_data(test_root, train_root)
 
-    def _handle_testing_data(self, test_root: str, train_root: str, fillnan_fn: Callable = None):
-        raw_data = air_quality_test_data(test_root, train_root, fillnan_fn)
+        X_items = []
+        for elm in raw_data["input"]:
+            X_feats = torch.tensor([])
+            X_loc = torch.tensor([])
 
-        data = {"input": []}
+            for station in elm.values():
+                feat, loc = self._preprocess_station_data(
+                    station["data"], station["location"], fillnan_fn)
 
-        for stations in raw_data["input"]:
-            feats = torch.tensor([])
-            locations = torch.tensor([])
+                X_feats = torch.cat((X_feats, feat.unsqueeze(0)), dim=0)
+                X_loc = torch.cat((X_loc, loc.unsqueeze(0)), dim=0)
 
-            for station in stations.items():
-                feat, loc = self._station_data_totensor(station)
-
-                feats = torch.cat((feats, feat), dim=0)
-                locations = torch.cat((locations, loc), dim=0)
-
-            data["input"].append({
-                "feat": feats,
-                "loc": locations
+            X_items.append({
+                "X_feats": X_feats,
+                "X_locs": X_loc
             })
 
-        target_loc = torch.tensor([])
-        for loc in raw_data["location_map"].values():
-            target_loc = torch.cat((target_loc, torch.tensor(loc).unsqueeze(0)), dim=0)
+        y_locs = torch.tensor([])
 
-        data["target_loc"] = target_loc
+        for loc in raw_data["output_location"].values():
+            loc = torch.tensor(loc)
+            y_locs = torch.cat((y_locs, loc.unsqueeze(0)), dim=0)
 
-        self._len_data = len(data["input"])
-
-        return data
+        return {
+            "input": X_items,
+            "y_locs": y_locs
+        }
 
     def _get_testing_item(self, idx):
+        n_target_stations = self.data["y_locs"].size(0)
+
+        tar_station_dix = idx % n_target_stations
+        sample_idx = idx // n_target_stations
+
         return {
-            "features": self.data["input"][idx]["feat"],
-            "src_loc": self.data["input"][idx]["loc"],
-            "tar_loc": self.data["target_loc"]
+            "features": self.data["input"][sample_idx]["X_feats"],
+            "src_locs": self.data["input"][sample_idx]["X_locs"],
+            "tar_loc": self.data["y_locs"][tar_station_dix]
         }
-        
-    def _station_data_totensor(self, station: Dict):
-        station_name, station = station
-        # location.shape == (1, 2)
-        location = torch.tensor(station["location"]).unsqueeze(0)
 
-        # xoa tram do neu khong du du lieu
-        if pd.isna(station["humidity"]).sum() == len(station["humidity"])\
-            or pd.isna(station["temperature"]).sum() == len(station["temperature"])\
-            or pd.isna(station["pm2.5"]).sum() == len(station["pm2.5"]):
+    def _preprocess_station_data(self, df: pd.DataFrame, location: Tuple[float, float], fillnan_fn: Callable = None):
+        # kiem tra neu du lieu trong thi drop station
+        if df["humidity"].isna().sum() == len(df)\
+                or df["temperature"].isna().sum() == len(df)\
+                or df["PM2.5"].isna().sum() == len(df):
 
-            print("drop station " + station_name)
             return torch.tensor([]), torch.tensor([])
 
-        # features.shape == (1, n_samples, n_features)
-        features = torch.tensor([
-            station["humidity"],
-            station["temperature"],
-            station["pm2.5"]
-        ]).t().unsqueeze(0)
+        if fillnan_fn is not None:
+            df["humidity"] = fillnan_fn(df["humidity"])
+            df["temperature"] = fillnan_fn(df["temperature"])
+            df["PM2.5"] = fillnan_fn(df["PM2.5"])
 
-        assert features.isnan().sum() == 0, "Features must not have NaN values at " + station_name
+        features = self.dataframe_to_tensor(
+            self.normalize_data(df),
+            usecols=["humidity", "temperature", "PM2.5"]
+        )
+
+        location = torch.tensor(location, dtype=torch.double)
 
         return features, location
 
+    def normalize_data(self, df: pd.DataFrame):
+        for col in df:
+            if df[col].dtype == float and col in self.normalize_mean:
+                df[col] = (df[col] - self.normalize_mean[col]) / \
+                    self.normalize_std[col]
+
+        return df
+
+    def dataframe_to_tensor(self, df: pd.DataFrame, usecols):
+        features = torch.tensor([])
+        for col in usecols:
+            features = torch.cat(
+                (features, torch.tensor(df[col], dtype=torch.float).unsqueeze(-1)), 
+            dim=-1)
+
+        return features
+
+
+class AirQualityDataModule(LightningDataModule):
+    def __init__(self,
+        rootdir: str,
+        output_frame_size: int,
+        normalize_mean: Dict[str, float],
+        normalize_std: Dict[str, float],
+        fillnan_fn: Callable = None,
+        train_ratio: float = 0.75,
+        batch_size: int = 32,
+    ):
+        super().__init__()
+
+        self.batch_size = batch_size
+        self.rootdir = rootdir
+        self.output_frame_size = output_frame_size
+        self.normalize_mean = normalize_mean
+        self.normalize_std = normalize_std
+        self.train_ratio = train_ratio
+        self.fillnan_fn = fillnan_fn
+
+    def setup(self, stage: Optional[str] = None):
+        datafull = AirQualityDataset(
+            self.rootdir,
+            self.output_frame_size,
+            self.normalize_mean,
+            self.normalize_std,
+            data_set="train",
+            fillnan_fn=self.fillnan_fn
+        )
+
+        train_size = int(len(datafull) * self.train_ratio)
+        val_size = len(datafull) - train_size
+
+        self.data_train, self.data_val = random_split(datafull, [train_size, val_size])
+
+    def train_dataloader(self):
+        return DataLoader(self.data_train, batch_size=self.batch_size, num_workers=4)
+
+    def val_dataloader(self):
+        return DataLoader(self.data_val, batch_size=self.batch_size, num_workers=2)
+
 
 if __name__ == "__main__":
-    dts = AirQualityDataset("data/", data_set="train", fillnan_fn=lambda x: x.interpolate(option="spline"))[0]
+    dts = AirQualityDataset(
+        "./data",
+        output_frame_size=24,
+        normalize_mean={"humidity": 0, "temperature": 0, "PM2.5": 0},
+        normalize_std={"humidity": 0.4, "temperature": 0.4, "PM2.5": 0.4},
+        data_set="train",
+        fillnan_fn=lambda x: x.interpolate(option="spline").bfill()
+    )
+
+    print(dts[0])
