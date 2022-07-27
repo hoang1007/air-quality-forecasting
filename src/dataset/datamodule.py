@@ -173,6 +173,7 @@ class AirQualityDataset(Dataset):
         return features, location
 
     def normalize_datatensor(self, data: torch.Tensor, col_order: List[str]):
+        data = data.clone()
         # data.shape == (..., n_features)
         for i in range(data.size(-1)):
             feat = col_order[i]
