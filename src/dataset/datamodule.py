@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Tuple, Optional
+from typing import Callable, Dict, List, Tuple, Optional
 import os
 from matplotlib.pyplot import fill
 import numpy as np
@@ -24,6 +24,7 @@ class AirQualityDataset(Dataset):
         self.normalize_mean = normalize_mean
         self.normalize_std = normalize_std
         self.data_set = data_set
+        self.feature_cols = ["humidity", "temperature", "PM2.5"]
 
         if data_set == "train":
             self.data, self._data_len = self.preprocess_training_data(
@@ -69,7 +70,8 @@ class AirQualityDataset(Dataset):
             feat, loc = self._preprocess_station_data(
                 station["data"], station["location"], fillnan_fn)
 
-            y_feats = torch.cat((y_feats, feat[:, -1].unsqueeze(0)), dim=0)
+            pm25_idx = self.feature_cols.index("PM2.5")
+            y_feats = torch.cat((y_feats, feat[:, pm25_idx].unsqueeze(0)), dim=0)
             y_loc = torch.cat((y_loc, loc.unsqueeze(0)), dim=0)
 
         # data_length = (num_timesteps - (input_frame_size + output_frame_size)) x n_target_stations
@@ -92,11 +94,20 @@ class AirQualityDataset(Dataset):
         src_end_idx = sample_idx + self.input_frame_size
         tar_end_idx = src_end_idx + self.output_frame_size
 
+        # features.shape == (n_stations, input_frame_size, n_features)
+        features = self.data["X_feats"][:, sample_idx: src_end_idx]
+        features = self.normalize_datatensor(features, self.feature_cols)
+
+        # gt_target.shape == (output_frame_size,)
+        gt_target = self.data["y_feats"][tar_station_dix][src_end_idx: tar_end_idx]
+        norm_target = self.normalize_datatensor(gt_target.unsqueeze(-1), ["PM2.5"]).squeeze(-1)
+
         return {
-            "features": self.data["X_feats"][:, sample_idx: src_end_idx],
+            "features": features,
             "src_locs": self.data["X_locs"],
             "tar_loc": self.data["y_locs"][tar_station_dix],
-            "target": self.data["y_feats"][tar_station_dix][src_end_idx: tar_end_idx]
+            "target": norm_target,
+            "gt_target": gt_target
         }
 
     def preprocess_testing_data(self, test_root: str, train_root: str, fillnan_fn: Callable = None):
@@ -136,35 +147,41 @@ class AirQualityDataset(Dataset):
         tar_station_dix = idx % n_target_stations
         sample_idx = idx // n_target_stations
 
+        features = self.data["input"][sample_idx]["X_feats"]
+        features = self.normalize_datatensor(features, self.feature_cols)
+
         return {
-            "features": self.data["input"][sample_idx]["X_feats"],
+            "features": features,
             "src_locs": self.data["input"][sample_idx]["X_locs"],
             "tar_loc": self.data["y_locs"][tar_station_dix]
         }
 
     def _preprocess_station_data(self, df: pd.DataFrame, location: Tuple[float, float], fillnan_fn: Callable = None):
         # kiem tra neu du lieu trong thi drop station
-        if df["humidity"].isna().sum() == len(df)\
-                or df["temperature"].isna().sum() == len(df)\
-                or df["PM2.5"].isna().sum() == len(df):
-
-            return torch.tensor([]), torch.tensor([])
+        for f in self.feature_cols:
+            if df[f].isna().sum() == len(df):
+                return torch.tensor([]), torch.tensor([])
 
         if fillnan_fn is not None:
-            df["humidity"] = fillnan_fn(df["humidity"])
-            df["temperature"] = fillnan_fn(df["temperature"])
-            df["PM2.5"] = fillnan_fn(df["PM2.5"])
+            for f in self.feature_cols:
+                df[f] = fillnan_fn(df[f])
 
-        features = self.dataframe_to_tensor(
-            self.normalize_data(df),
-            usecols=["humidity", "temperature", "PM2.5"]
-        )
+        features = self.dataframe_to_tensor(df, usecols=self.feature_cols)
 
-        location = torch.tensor(location, dtype=torch.double)
+        location = torch.tensor(location)
 
         return features, location
 
-    def normalize_data(self, df: pd.DataFrame):
+    def normalize_datatensor(self, data: torch.Tensor, col_order: List[str]):
+        # data.shape == (..., n_features)
+        for i in range(data.size(-1)):
+            feat = col_order[i]
+
+            data[..., i] = (data[..., i] - self.normalize_mean[feat]) / self.normalize_std[feat]
+        
+        return data
+
+    def normalize_dataframe(self, df: pd.DataFrame):
         for col in df:
             if df[col].dtype == float and col in self.normalize_mean:
                 df[col] = (df[col] - self.normalize_mean[col]) / \
@@ -218,10 +235,10 @@ class AirQualityDataModule(LightningDataModule):
         self.data_train, self.data_val = random_split(datafull, [train_size, val_size])
 
     def train_dataloader(self):
-        return DataLoader(self.data_train, batch_size=self.batch_size, num_workers=4)
+        return DataLoader(self.data_train, batch_size=self.batch_size, num_workers=2)
 
     def val_dataloader(self):
-        return DataLoader(self.data_val, batch_size=self.batch_size, num_workers=2)
+        return DataLoader(self.data_val, batch_size=self.batch_size, num_workers=1)
 
 
 if __name__ == "__main__":
