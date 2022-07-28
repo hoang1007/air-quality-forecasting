@@ -1,19 +1,21 @@
 training:
-  batch_size: 2
+  batch_size: 32
   n_features: 3 # humidity, temperature and pm2.5
   n_sequence: 168 # chiều dài timesteps đầu vào
   output_dim: 24 # chiều dài dự đoán
   num_enc_layers: 1 # số encoder layer của LSTMAutoEncoder
   num_dec_layers: 1 # số decoder layer của LSTMAutoEncoder
-  hidden_size_autoencoder: 8 # hidden_size của LSTMAutoEncoder
+  hidden_size_autoencoder: 128 # hidden_size của LSTMAutoEncoder
   num_extractor_layers: 2
-  extractor_size: 16
+  extractor_size: 64
+  attention_dropout: 0.2
   optim:
     lr: 0.001
     step_size: 50
 
 
 data:
+  stride: 1 # khoảng cách của khung lấy mẫu
   normalize_mean:
     temperature: 26.52
     humidity: 74.91

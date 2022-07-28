@@ -11,12 +11,19 @@ class InverseDistanceAttention(nn.Module):
     Returns:
         outputs: Tensor (batch_size, n_sequence, n_features)
     '''
-    def __init__(self, n_features):
+    def __init__(self, n_features: int, dropout: float = 0.1):
         super().__init__()
         self.n_features = n_features
 
         self.proj1 = nn.Linear(n_features, n_features, bias=True)
         self.proj2 = nn.Linear(n_features, 1, bias=True)
+        self.attention = nn.Sequential(
+            nn.Linear(n_features, n_features, bias=True),
+            nn.ReLU(),
+            nn.Linear(n_features, 1, bias=True),
+            nn.ReLU(),
+            nn.Dropout(p=dropout)
+        )
     
     def compute_invdist_scores(self, src_locs: torch.Tensor, tar_locs: torch.Tensor):
         tar_length = tar_locs.size(1)
@@ -31,16 +38,12 @@ class InverseDistanceAttention(nn.Module):
 
         # dists.shape == (batch_size, src_length, tar_length)
         dists = (src_locs - tar_locs).pow(2).sum(dim=-1).sqrt()
-        inv_dists = torch.div(1, dists).float()
+        inv_dists = torch.div(1e-3, dists + 1e-8).float()
 
         return inv_dists
 
     def forward(self, features: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
-        attn = self.proj1(features)
-        attn = torch.relu(attn)
-
-        attn = self.proj2(attn)
-        attn = torch.relu(attn) # shape == (batch_size, n_sequence, src_length, 1)
+        attn = self.attention(features) # shape == (batch_size, n_sequence, src_length, 1)
         
         # inv_dists.shape == (batch_size, src_length, 1)
         inv_dists = self.compute_invdist_scores(src_locs, tar_locs.unsqueeze(1))
@@ -48,11 +51,43 @@ class InverseDistanceAttention(nn.Module):
         # attn_scores.shape == (batch_size, n_sequence, src_length, 1)
         attn_scores = torch.softmax(attn * inv_dists.unsqueeze(1), dim=2)
 
-        # outputs.shape == (batch_size, n_sequence, tar_length, n_features)
-        # outputs = torch.einsum("abcd,abce->abed", features, attn_scores)
-        outputs = (features * attn_scores).sum(2)
+        outputs = (features * attn_scores).sum(2).squeeze(-1)
 
         return outputs
+
+
+class InverseDistancePooling(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def compute_invdist_scores(self, src_locs: torch.Tensor, tar_locs: torch.Tensor):
+        tar_length = tar_locs.size(1)
+        # expand src_locs to shape (batch_size, src_length, tar_length, 2)
+        src_locs = src_locs.unsqueeze(-2)
+        new_shape = list(src_locs.shape)
+        new_shape[-2] = tar_length
+        src_locs = src_locs.expand(new_shape)
+        
+        # tar_locs.shape == (batch_size, 1, tar_length, 2)
+        tar_locs = tar_locs.unsqueeze(1)
+
+        # dists.shape == (batch_size, src_length, tar_length)
+        dists = (src_locs - tar_locs).pow(2).sum(dim=-1).sqrt()
+        inv_dists = torch.div(1, dists + 1e-8).float()
+
+        return inv_dists
+
+    def forward(self, inputs: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
+        # inputs.shape == (batch_size, src_len, n_timesteps, n_features)
+        inputs = inputs.permute(0, 2, 3, 1) # (batch_size, n_timesteps, n_features, src_len)
+
+        # inv_dists.shape == (batch_size, src_len)
+        inv_dists = self.compute_invdist_scores(src_locs, tar_locs.unsqueeze(1)).squeeze(-1)
+        inv_dists = inv_dists[:, None, None, :] # (batch_size, 1, 1, src_len)
+
+        pooled = (inputs * inv_dists).sum(-1) / inv_dists.sum(-1)
+
+        return pooled
 
 
 class LSTMAutoEncoder(nn.Module):
@@ -102,9 +137,10 @@ class HybridPredictor(nn.Module):
     def __init__(self, config, n_features: int):
         super().__init__()
 
+        self.output_dim = config["output_dim"]
         self.linear1 = nn.Linear(n_features, n_features)
 
-        self.indep_predictor = nn.Linear(config["n_sequence"] * n_features, config["output_dim"])
+        self.indep_predictor = nn.Linear(n_features * config["n_sequence"], config["output_dim"])
 
         self.dep_predictor = LSTMAutoEncoder(config, n_features)
 
@@ -112,6 +148,9 @@ class HybridPredictor(nn.Module):
         
     def forward(self, inputs):
         batch_size = inputs.size(0)
+
+        inputs = self.linear1(inputs)
+        inputs = torch.relu(inputs)
 
         # output.shape == (batch, output_dim, 1)
         indep_output = self.indep_predictor(inputs.view(batch_size, -1)).unsqueeze(-1)
@@ -126,10 +165,13 @@ class HybridPredictor(nn.Module):
 
 
 if __name__ == "__main__":
-    ida = InverseDistanceAttention(3)
+    # ida = InverseDistanceAttention(3)
 
-    feats = torch.rand((1, 10, 3, 3))
-    src_locs = torch.rand((1, 3, 2))
-    tar_locs = torch.rand((1, 2))
+    feats = torch.rand((2, 3, 10, 3))
+    src_locs = torch.rand((2, 3, 2))
+    tar_locs = torch.rand((2, 2))
 
-    print(ida(feats, src_locs, tar_locs).shape)
+    # print(ida(feats, src_locs, tar_locs).shape)
+    idl = InverseDistancePooling()
+
+    print(idl(feats, src_locs, tar_locs).shape) 

@@ -16,6 +16,7 @@ class AirQualityDataset(Dataset):
         output_frame_size: int,
         normalize_mean: Dict[str, float],
         normalize_std: Dict[str, float],
+        stride: int = 1,
         data_set: str = "train",
         fillnan_fn: Callable = None,
     ):
@@ -23,6 +24,7 @@ class AirQualityDataset(Dataset):
         self.output_frame_size = output_frame_size
         self.normalize_mean = normalize_mean
         self.normalize_std = normalize_std
+        self.stride = stride
         self.data_set = data_set
         self.feature_cols = ["humidity", "temperature", "PM2.5"]
 
@@ -33,7 +35,8 @@ class AirQualityDataset(Dataset):
             )
         elif data_set == "test":
             self.data, self._data_len = self.preprocess_testing_data(
-                os.path.join(rootdir, "data-test"),
+                os.path.join(rootdir, "public-test"),
+                os.path.join(rootdir, "data-train"),
                 fillnan_fn,
             )
         else:
@@ -67,12 +70,15 @@ class AirQualityDataset(Dataset):
         y_loc = torch.tensor([])
 
         for station in raw_data["output"].values():
-            feat, loc = self._preprocess_station_data(
-                station["data"], station["location"], fillnan_fn)
+            try:
+                feat, loc = self._preprocess_station_data(
+                    station["data"], station["location"], fillnan_fn)
 
-            pm25_idx = self.feature_cols.index("PM2.5")
-            y_feats = torch.cat((y_feats, feat[:, pm25_idx].unsqueeze(0)), dim=0)
-            y_loc = torch.cat((y_loc, loc.unsqueeze(0)), dim=0)
+                pm25_idx = self.feature_cols.index("PM2.5")
+                y_feats = torch.cat((y_feats, feat[:, pm25_idx].unsqueeze(0)), dim=0)
+                y_loc = torch.cat((y_loc, loc.unsqueeze(0)), dim=0)
+            except:
+                continue
 
         # data_length = (num_timesteps - (input_frame_size + output_frame_size)) x n_target_stations
         data_length = (X_feats.size(1) - (self.input_frame_size +
@@ -89,7 +95,7 @@ class AirQualityDataset(Dataset):
         n_target_stations = self.data["y_locs"].size(0)
 
         tar_station_dix = idx % n_target_stations
-        sample_idx = idx // n_target_stations
+        sample_idx = (idx // n_target_stations) * self.stride
 
         src_end_idx = sample_idx + self.input_frame_size
         tar_end_idx = src_end_idx + self.output_frame_size
@@ -119,11 +125,14 @@ class AirQualityDataset(Dataset):
             X_loc = torch.tensor([])
 
             for station in elm.values():
-                feat, loc = self._preprocess_station_data(
-                    station["data"], station["location"], fillnan_fn)
+                try:
+                    feat, loc = self._preprocess_station_data(
+                        station["data"], station["location"], fillnan_fn)
 
-                X_feats = torch.cat((X_feats, feat.unsqueeze(0)), dim=0)
-                X_loc = torch.cat((X_loc, loc.unsqueeze(0)), dim=0)
+                    X_feats = torch.cat((X_feats, feat.unsqueeze(0)), dim=0)
+                    X_loc = torch.cat((X_loc, loc.unsqueeze(0)), dim=0)
+                except:
+                    continue
 
             X_items.append({
                 "X_feats": X_feats,
@@ -136,31 +145,28 @@ class AirQualityDataset(Dataset):
             loc = torch.tensor(loc)
             y_locs = torch.cat((y_locs, loc.unsqueeze(0)), dim=0)
 
+        data_length = len(raw_data["input"])
+
         return {
             "input": X_items,
             "y_locs": y_locs
-        }
+        }, data_length
 
     def _get_testing_item(self, idx):
-        n_target_stations = self.data["y_locs"].size(0)
-
-        tar_station_dix = idx % n_target_stations
-        sample_idx = idx // n_target_stations
-
-        features = self.data["input"][sample_idx]["X_feats"]
+        features = self.data["input"][idx]["X_feats"]
         features = self.normalize_datatensor(features, self.feature_cols)
 
         return {
             "features": features,
-            "src_locs": self.data["input"][sample_idx]["X_locs"],
-            "tar_loc": self.data["y_locs"][tar_station_dix]
+            "src_locs": self.data["input"][idx]["X_locs"],
+            "tar_locs": self.data["y_locs"]
         }
 
     def _preprocess_station_data(self, df: pd.DataFrame, location: Tuple[float, float], fillnan_fn: Callable = None):
         # kiem tra neu du lieu trong thi drop station
         for f in self.feature_cols:
             if df[f].isna().sum() == len(df):
-                return torch.tensor([]), torch.tensor([])
+                raise Exception("Empty columns")
 
         if fillnan_fn is not None:
             for f in self.feature_cols:
@@ -206,6 +212,7 @@ class AirQualityDataModule(LightningDataModule):
         output_frame_size: int,
         normalize_mean: Dict[str, float],
         normalize_std: Dict[str, float],
+        stride: int = 1,
         fillnan_fn: Callable = None,
         train_ratio: float = 0.75,
         batch_size: int = 32,
@@ -248,7 +255,7 @@ if __name__ == "__main__":
         output_frame_size=24,
         normalize_mean={"humidity": 0, "temperature": 0, "PM2.5": 0},
         normalize_std={"humidity": 0.4, "temperature": 0.4, "PM2.5": 0.4},
-        data_set="train",
+        data_set="test",
         fillnan_fn=lambda x: x.interpolate(option="spline").bfill()
     )
 

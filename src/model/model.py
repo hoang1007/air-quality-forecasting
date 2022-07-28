@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from .layers import InverseDistanceAttention, HybridPredictor
+from .layers import InverseDistanceAttention, HybridPredictor, LSTMAutoEncoder
 from utils.metrics import MultiMetrics
 
 
@@ -28,8 +28,13 @@ class AQFModel(pl.LightningModule):
             num_layers=config["num_extractor_layers"]
         )
 
-        self.invdist_attention = InverseDistanceAttention(config["extractor_size"])
-        self.hybrid_predictor = HybridPredictor(config, config["extractor_size"])
+        self.invdist_attention = InverseDistanceAttention(
+            config["extractor_size"], 
+            config["attention_dropout"]
+        )
+
+        self.autoencoder = LSTMAutoEncoder(config, config["extractor_size"])
+        # self.hybrid_predictor = HybridPredictor(config, config["extractor_size"])
 
         self.target_normalize_mean = target_normalize_mean
         self.target_normalize_std = target_normalize_std
@@ -48,11 +53,37 @@ class AQFModel(pl.LightningModule):
 
         # features.shape == (batch_size, n_timesteps, n_stations1, n_features)
         features = features.view(batch_size, n_stations1, n_timesteps, -1)\
-                        .permute(0, 2, 1, 3).contiguous()
+                        .permute(0, 2, 1, 3)
 
         output = self.invdist_attention(features, src_locs, tar_loc)
-        output = self.hybrid_predictor(output)
+        # output = self.hybrid_predictor(output)
+        output = self.autoencoder(output).squeeze(-1)
 
+        return output
+
+    def predict(self,
+        features: torch.Tensor,
+        src_locs: torch.Tensor,
+        tar_loc: torch.Tensor):
+        '''
+        Args:
+            features: Tensor (n_stations, n_timesteps, n_features)
+            src_locs: Tensor (n_stations, 2)
+            tar_loc: Tensor (2)
+
+        Returns:
+            output: Tensor (n_output_timesteps,)
+        '''
+        self.eval()
+        with torch.no_grad():
+            # add batch dim
+            features = features.unsqueeze(0).to(self.device)
+            src_locs = src_locs.unsqueeze(0).to(self.device)
+            tar_loc = tar_loc.unsqueeze(0).to(self.device)
+
+            output = self(features, src_locs, tar_loc).squeeze(0)
+            # inverse transforms
+            output = output * self.target_normalize_std + self.target_normalize_mean
         return output
 
     def training_step(self, batch, batch_idx):
@@ -71,7 +102,23 @@ class AQFModel(pl.LightningModule):
         # inverse transform
         preds = outputs * self.target_normalize_std + self.target_normalize_mean
 
-        self.log_dict(self.metrics(preds, batch["target"]))
+        return self.metrics(preds, batch["gt_target"])
+
+    def validation_epoch_end(self, val_outputs):
+        metrics = {}
+
+        for batch in val_outputs:
+            for metric in batch:
+                if metric in metrics:
+                    metrics[metric].append(batch[metric])
+                else:
+                    metrics[metric] = [batch[metric]]
+
+        for metric in metrics:
+            metrics[metric] = sum(metrics[metric]) / len(metrics[metric])
+
+        self.log_dict(metrics)
+            
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.optim_config["lr"])
