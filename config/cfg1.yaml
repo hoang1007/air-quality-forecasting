@@ -3,15 +3,23 @@ training:
   n_features: 3 # humidity, temperature and pm2.5
   n_sequence: 168 # chiều dài timesteps đầu vào
   output_dim: 24 # chiều dài dự đoán
+  src_len: 11 # số trạm đã biết tối đa
   num_enc_layers: 1 # số encoder layer của LSTMAutoEncoder
   num_dec_layers: 1 # số decoder layer của LSTMAutoEncoder
   hidden_size_autoencoder: 128 # hidden_size của LSTMAutoEncoder
   num_extractor_layers: 2
   extractor_size: 64
-  attention_dropout: 0.2
+  attn_dropout: 0.2
+  max_num_mask: 3
   optim:
     lr: 0.001
-    step_size: 50
+    scheduler: "plateau"
+    steplr:
+      step_size: 50
+    plateau:
+      patience: 5
+      eps: 0.0000001 # 1e-7
+      monitor: "mdape"
 
 
 data:

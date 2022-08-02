@@ -1,29 +1,26 @@
 import torch
 from torch import nn
+import random
 
 class InverseDistanceAttention(nn.Module):
     '''
     Args:
-        features: Tensor (batch_size, n_sequence, src_length, n_features)
+        features: Tensor (batch_size, src_length, n_features)
         src_locs: Tensor (batch_size, src_length, 2)
         tar_locs: Tensor (batch_size, 2)
 
     Returns:
-        outputs: Tensor (batch_size, n_sequence, n_features)
+        outputs: Tensor (batch_size, src_length, n_features)
     '''
-    def __init__(self, n_features: int, dropout: float = 0.1):
+    def __init__(
+        self,
+        config,
+        n_features: int):
         super().__init__()
-        self.n_features = n_features
 
-        self.proj1 = nn.Linear(n_features, n_features, bias=True)
-        self.proj2 = nn.Linear(n_features, 1, bias=True)
-        self.attention = nn.Sequential(
-            nn.Linear(n_features, n_features, bias=True),
-            nn.ReLU(),
-            nn.Linear(n_features, 1, bias=True),
-            nn.ReLU(),
-            nn.Dropout(p=dropout)
-        )
+        self.attention = nn.Linear(n_features, 1)
+        self.linear = nn.Linear(n_features, n_features)
+        self.dropout = nn.Dropout(config["attn_dropout"])
     
     def compute_invdist_scores(self, src_locs: torch.Tensor, tar_locs: torch.Tensor):
         tar_length = tar_locs.size(1)
@@ -38,21 +35,47 @@ class InverseDistanceAttention(nn.Module):
 
         # dists.shape == (batch_size, src_length, tar_length)
         dists = (src_locs - tar_locs).pow(2).sum(dim=-1).sqrt()
-        inv_dists = torch.div(1e-3, dists + 1e-8).float()
+        inv_dists = torch.div(1, dists + 1e-8).float()
 
         return inv_dists
 
+    def locs_to_grid(self, src_locs: torch.Tensor, tar_locs: torch.Tensor):
+        num_src_locs = src_locs.size(1)
+        # (batch_size, n_locs, 2)
+        locs = torch.cat((src_locs, tar_locs), dim=1)
+
+        x_sorted = torch.sort(locs[:, :, 0], dim=-1).values
+        y_sorted = torch.sort(locs[:, :, 1], dim=-1).values
+
+        x_min = x_sorted[:, :1]
+        y_min = y_sorted[:, :1]
+
+        x_min_diff = torch.diff(x_sorted)
+        x_min_diff[x_min_diff.eq(0)] = 1e9
+        x_min_diff = x_min_diff.min(dim=-1, keepdim=True).values
+
+        y_min_diff = torch.diff(y_sorted)
+        y_min_diff[y_min_diff.eq(0)] = 1e9
+        y_min_diff = y_min_diff.min(dim=-1, keepdim=True).values
+
+        locs[:, :, 0] = torch.div(locs[:, :, 0] - x_min, x_min_diff, rounding_mode="trunc")
+        locs[:, :, 1] = torch.div(locs[:, :, 1] - y_min, y_min_diff, rounding_mode="trunc")
+
+        return locs[:, :num_src_locs], locs[:, num_src_locs:]
+
     def forward(self, features: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
-        attn = self.attention(features) # shape == (batch_size, n_sequence, src_length, 1)
+        tar_locs = tar_locs.unsqueeze(1) # only support 1 target location
+
+        attn = self.attention(features) # shape == (batch_size, src_length, 1)
         
+        grid_src_locs, grid_tar_locs = self.locs_to_grid(src_locs, tar_locs)
         # inv_dists.shape == (batch_size, src_length, 1)
-        inv_dists = self.compute_invdist_scores(src_locs, tar_locs.unsqueeze(1))
+        inv_dists = self.compute_invdist_scores(grid_src_locs, grid_tar_locs)
 
-        # attn_scores.shape == (batch_size, n_sequence, src_length, 1)
-        attn_scores = torch.softmax(attn * inv_dists.unsqueeze(1), dim=2)
+        # attn_scores.shape == (batch_size, src_length, 1)
+        attn_scores = torch.softmax(attn * inv_dists, dim=1)
 
-        outputs = (features * attn_scores).sum(2).squeeze(-1)
-
+        outputs = self.dropout(attn_scores * features)
         return outputs
 
 
@@ -78,14 +101,12 @@ class InverseDistancePooling(nn.Module):
         return inv_dists
 
     def forward(self, inputs: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
-        # inputs.shape == (batch_size, src_len, n_timesteps, n_features)
-        inputs = inputs.permute(0, 2, 3, 1) # (batch_size, n_timesteps, n_features, src_len)
+        # inputs.shape == (batch_size, src_len, n_features)
 
-        # inv_dists.shape == (batch_size, src_len)
-        inv_dists = self.compute_invdist_scores(src_locs, tar_locs.unsqueeze(1)).squeeze(-1)
-        inv_dists = inv_dists[:, None, None, :] # (batch_size, 1, 1, src_len)
+        # inv_dists.shape == (batch_size, src_len, 1)
+        inv_dists = self.compute_invdist_scores(src_locs, tar_locs.unsqueeze(1))
 
-        pooled = (inputs * inv_dists).sum(-1) / inv_dists.sum(-1)
+        pooled = (inputs * inv_dists).sum(1) / inv_dists.sum(1)
 
         return pooled
 
@@ -109,59 +130,86 @@ class LSTMAutoEncoder(nn.Module):
             num_layers=config["num_dec_layers"]
         )
 
-        self.linear = nn.Linear(config["hidden_size_autoencoder"], 1)
+        self.linear2 = nn.Linear(config["hidden_size_autoencoder"], 1)
 
     def forward(self, x: torch.Tensor):
-        # x.shape == (batch_size, seq_len, n_features)
-        encoder_output, enc_state = self.encoder(x)
-        encoder_output = torch.relu(encoder_output[:, -1, :]).unsqueeze(1)
+        # x.shape == (batch_size, n_features)
+        encoder_output, enc_state = self.encoder(x.unsqueeze(1))
+        encoder_output = torch.relu(encoder_output)
 
-        output, _ = self.decoder(encoder_output, enc_state)
+        decoder_in, _ = self.decoder(encoder_output, enc_state)
+
+        outputs = [decoder_in]
 
         for t in range(self.output_dim - 1):
-            pred, _ = self.decoder(output, enc_state)
-            pred = pred[:, -1, :].unsqueeze(1)
+            pred, _ = self.decoder(decoder_in, enc_state)
 
-            output = torch.cat((output, pred), dim=1)
+            outputs.append(pred)
+            decoder_in = pred
         
-        output = self.linear(output)
+        outputs = torch.cat(outputs, dim=1)
+        outputs = self.linear2(outputs)
 
-        return output
+        return outputs
 
 
 class HybridPredictor(nn.Module):
     '''
     Args:
-        inputs: Tensor (batch_size, n_sequence, n_features)
+        inputs: Tensor (batch_size, src_length, n_features)
+        src_mask: Tensor (batch_size, src_length)
     '''
     def __init__(self, config, n_features: int):
         super().__init__()
 
+        self.src_len = config["src_len"]
+        self.max_num_mask = config["max_num_mask"]
         self.output_dim = config["output_dim"]
-        self.linear1 = nn.Linear(n_features, n_features)
 
-        self.indep_predictor = nn.Linear(n_features * config["n_sequence"], config["output_dim"])
+        ff_size = n_features * self.src_len
 
-        self.dep_predictor = LSTMAutoEncoder(config, n_features)
+        self.linear1 = nn.Linear(ff_size, ff_size)
 
-        self.weight = nn.Linear(2, 1)
+        self.indep_predictor = nn.Linear(ff_size, config["output_dim"])
+
+        self.dep_predictor = LSTMAutoEncoder(config, ff_size)
+
+        self.alpha = torch.tensor(0.5, requires_grad=True)
+
+    def _random_masking(self, device):
+        """
+        Ngẫu nhiên mask một số trạm đo
+
+        Return:
+          mask: Tensor (src_len)
+        """
+        mask = torch.ones((self.src_len), device=device)
+
+        num_mask = random.randint(0, self.src_len)
+        mask_ids = torch.randperm(self.src_len, device=device)[:num_mask]
+        mask[mask_ids] = 0
+
+        return mask
         
-    def forward(self, inputs):
+    def forward(self, inputs, src_mask):
         batch_size = inputs.size(0)
-
-        inputs = self.linear1(inputs)
-        inputs = torch.relu(inputs)
-
-        # output.shape == (batch, output_dim, 1)
-        indep_output = self.indep_predictor(inputs.view(batch_size, -1)).unsqueeze(-1)
-
-        dep_output = self.dep_predictor(inputs)
-
-        hybrid = torch.cat((indep_output, dep_output), dim=-1)
         
-        output = self.weight(hybrid).squeeze(-1)
+        if self.training:
+            has_mask = (src_mask == 0).sum(-1)
+            for batch_idx in range(batch_size):
+                if has_mask[batch_idx] == 0:
+                    src_mask[batch_idx] = self._random_masking(inputs.device)
 
-        return output
+        inputs = (inputs * src_mask.unsqueeze(-1)).view(batch_size, -1)
+        inputs = torch.relu(self.linear1(inputs))
+
+        indep_output = self.indep_predictor(inputs)
+
+        dep_output = self.dep_predictor(inputs).squeeze(-1)
+
+        hybrid_out = indep_output * self.alpha + dep_output * (1 - self.alpha)
+        
+        return hybrid_out
 
 
 if __name__ == "__main__":

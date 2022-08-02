@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from .layers import InverseDistanceAttention, HybridPredictor, LSTMAutoEncoder
+from .layers import *
 from utils.metrics import MultiMetrics
 
 
@@ -18,23 +18,26 @@ class AQFModel(pl.LightningModule):
     Returns:
         outputs: PM2.5 của các trạm đo cần dự đoán. Tensor (n_batches, n_stations2)
     '''
+
     def __init__(self, config, target_normalize_mean: float, target_normalize_std: float):
         super().__init__()
 
+        self.extractor_size = config["extractor_size"]
+
         self.feat_extractor = nn.LSTM(
             input_size=config["n_features"],
-            hidden_size=config["extractor_size"],
+            hidden_size=self.extractor_size,
             batch_first=True,
             num_layers=config["num_extractor_layers"]
         )
 
         self.invdist_attention = InverseDistanceAttention(
-            config["extractor_size"], 
-            config["attention_dropout"]
+            config,
+            self.extractor_size
         )
+        # self.invdist_pooling = InverseDistancePooling()
 
-        self.autoencoder = LSTMAutoEncoder(config, config["extractor_size"])
-        # self.hybrid_predictor = HybridPredictor(config, config["extractor_size"])
+        self.hybrid_predictor = HybridPredictor(config, self.extractor_size)
 
         self.target_normalize_mean = target_normalize_mean
         self.target_normalize_std = target_normalize_std
@@ -43,28 +46,23 @@ class AQFModel(pl.LightningModule):
 
         self.optim_config = config["optim"]
 
-    def forward(self, features: torch.Tensor, src_locs: torch.Tensor, tar_loc: torch.Tensor):
+    def forward(self, features: torch.Tensor, src_locs: torch.Tensor, tar_loc: torch.Tensor, src_mask: torch.Tensor):
         batch_size, n_stations1, n_timesteps, n_features = features.size()
 
-        # features.shape == (batch_size * n_stations1, n_timesteps, n_features)
-        features = features.view(batch_size * n_stations1, n_timesteps, n_features)
+        feat_extracted = features.new_zeros((batch_size, n_stations1, self.extractor_size))
+        for s in range(n_stations1):
+            self.feat_extractor.flatten_parameters()
+            feat_extracted[:, s, :] = self.feat_extractor(features[:, s, :, :])[0][:, -1]
 
-        features = self.feat_extractor(features)[0]
-
-        # features.shape == (batch_size, n_timesteps, n_stations1, n_features)
-        features = features.view(batch_size, n_stations1, n_timesteps, -1)\
-                        .permute(0, 2, 1, 3)
-
-        output = self.invdist_attention(features, src_locs, tar_loc)
-        # output = self.hybrid_predictor(output)
-        output = self.autoencoder(output).squeeze(-1)
+        output = self.invdist_attention(feat_extracted, src_locs, tar_loc)
+        output = self.hybrid_predictor(output, src_mask)
 
         return output
 
     def predict(self,
-        features: torch.Tensor,
-        src_locs: torch.Tensor,
-        tar_loc: torch.Tensor):
+                features: torch.Tensor,
+                src_locs: torch.Tensor,
+                tar_loc: torch.Tensor):
         '''
         Args:
             features: Tensor (n_stations, n_timesteps, n_features)
@@ -87,17 +85,17 @@ class AQFModel(pl.LightningModule):
         return output
 
     def training_step(self, batch, batch_idx):
-        outputs = self(batch["features"], batch["src_locs"], batch["tar_loc"])
+        outputs = self(batch["features"], batch["src_locs"], batch["tar_loc"], batch["mask"])
 
         loss = F.mse_loss(outputs, batch["target"])
 
         self.log("loss", loss.item())
 
         return loss
-    
+
     def validation_step(self, batch, batch_idx):
         # outputs.shape == (batch_size, n_pred_steps)
-        outputs = self(batch["features"], batch["src_locs"], batch["tar_loc"])
+        outputs = self(batch["features"], batch["src_locs"], batch["tar_loc"], batch["mask"])
 
         # inverse transform
         preds = outputs * self.target_normalize_std + self.target_normalize_mean
@@ -118,15 +116,27 @@ class AQFModel(pl.LightningModule):
             metrics[metric] = sum(metrics[metric]) / len(metrics[metric])
 
         self.log_dict(metrics)
-            
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.optim_config["lr"])
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.optim_config["step_size"])
+        optimizer = torch.optim.Adam(
+            self.parameters(), lr=self.optim_config["lr"])
 
+        print("Using", self.optim_config["scheduler"])
+        
+        if self.optim_config["scheduler"] == "plateau":
+            scheduler_cfg = self.optim_config["plateau"]
+            scheduler = {"scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                patience=scheduler_cfg["patience"],
+                eps=scheduler_cfg["eps"]
+            ),
+                "monitor": scheduler_cfg["monitor"]}
+        else:
+            scheduler_cfg = self.optim_config["steplr"]
+            scheduler = {"scheduler": torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=scheduler_cfg["step_size"])}
+        
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-            }
+            "lr_scheduler": scheduler
         }
