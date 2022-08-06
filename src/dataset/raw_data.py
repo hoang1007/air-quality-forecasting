@@ -1,10 +1,17 @@
 from typing import Dict, Tuple
 import os
-import numpy as np
 import pandas as pd
 
 
 def air_quality_train_data(rootdir: str):
+    '''
+    Một dict dữ liệu gồm `input` và `output`.
+
+    Dữ liệu các trạm được lưu dưới dạng:
+        station_name:
+            data: pandas.DataFrame
+            location: tuple (float, float)
+    '''
     input_loc = _read_location_map(os.path.join(rootdir, 'location_input.csv'))
     output_loc = _read_location_map(os.path.join(rootdir, 'location_output.csv'))
 
@@ -14,13 +21,21 @@ def air_quality_train_data(rootdir: str):
     }
 
 def air_quality_test_data(test_rootdir:str, train_rootdir: str):
+    '''
+    Một list dữ liệu các trạm.
+    
+    Dữ liệu các trạm được lưu dưới dạng:
+        station_name:
+            data: pandas.DataFrame
+            location: tuple (float, float)
+    '''
     input_loc = _read_location_map(os.path.join(train_rootdir, 'location_input.csv'))
     output_loc = _read_location_map(os.path.join(test_rootdir, 'location.csv'))
 
     data = {"input": [], "output_location": output_loc}
 
-    for dir in os.listdir(os.path.join(test_rootdir, 'input')):
-        dir_path = os.path.join(test_rootdir, 'input', dir)
+    for folder_idx in range(1, 101):
+        dir_path = os.path.join(test_rootdir, 'input', str(folder_idx))
 
         if os.path.isdir(dir_path):
             data["input"].append(_read_stations(dir_path, input_loc))
