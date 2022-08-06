@@ -101,7 +101,8 @@ class AirQualityDataset(Dataset):
         return {
             "features": X_feats,
             "src_locs": X_locs,
-            "tar_locs": self.data["y_locs"]
+            "tar_locs": self.data["y_locs"],
+            "folder_idx": self.data["folder_idx"][index],
         }
 
     def _get_features(self,

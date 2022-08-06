@@ -32,13 +32,14 @@ def air_quality_test_data(test_rootdir:str, train_rootdir: str):
     input_loc = _read_location_map(os.path.join(train_rootdir, 'location_input.csv'))
     output_loc = _read_location_map(os.path.join(test_rootdir, 'location.csv'))
 
-    data = {"input": [], "output_location": output_loc}
+    data = {"input": [], "output_location": output_loc, "folder_idx": []}
 
     for folder_idx in range(1, 101):
         dir_path = os.path.join(test_rootdir, 'input', str(folder_idx))
 
         if os.path.isdir(dir_path):
             data["input"].append(_read_stations(dir_path, input_loc))
+            data["folder_idx"].append(folder_idx)
         else:
             raise ValueError("Invalid folder structure")
     
