@@ -224,10 +224,8 @@ class AirQualityDataset(Dataset):
 class AirQualityDataModule(LightningDataModule):
     def __init__(self,
         rootdir: str,
-        output_frame_size: int,
         normalize_mean: Dict[str, float],
         normalize_std: Dict[str, float],
-        stride: int = 1,
         fillnan_fn: Callable = None,
         train_ratio: float = 0.75,
         batch_size: int = 32,
@@ -236,20 +234,16 @@ class AirQualityDataModule(LightningDataModule):
 
         self.batch_size = batch_size
         self.rootdir = rootdir
-        self.output_frame_size = output_frame_size
         self.normalize_mean = normalize_mean
         self.normalize_std = normalize_std
-        self.stride = stride
         self.train_ratio = train_ratio
         self.fillnan_fn = fillnan_fn
 
     def setup(self, stage: Optional[str] = None):
         datafull = AirQualityDataset(
             self.rootdir,
-            self.output_frame_size,
             self.normalize_mean,
             self.normalize_std,
-            stride=self.stride,
             data_set="train",
             fillnan_fn=self.fillnan_fn
         )
