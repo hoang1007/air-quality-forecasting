@@ -3,3 +3,4 @@ pytorch-lightning
 pytorch-forecasting
 numpy
 pandas
+hydra-core

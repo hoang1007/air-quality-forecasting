@@ -23,12 +23,11 @@ training:
 
 
 data:
-  stride: 1 # khoảng cách của khung lấy mẫu
   normalize_mean:
-    temperature: 26.52
-    humidity: 74.91
-    PM2.5: 43.87
+    temperature: 26.546403688351234
+    humidity: 75.76537114905305
+    PM2.5: 45.063545172080076
   normalize_std:
-    temperature: 5.77
-    humidity: 15.38
-    PM2.5: 40.12
+    temperature: 5.938755783975602
+    humidity: 15.434225331097021
+    PM2.5: 42.227863829824535
