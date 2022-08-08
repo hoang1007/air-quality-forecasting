@@ -59,116 +59,134 @@ class AirQualityDataset(Dataset):
             raise ValueError
 
     def _get_training_item(self, index):
-        # X_feats: dict {station_name: feat (Tensor)} with feat.shape == (n_timesteps, n_features)
-        # X_locs: dict {station_name: loc (Tensor)} with loc.shape == (2)
-        # y: Tensor (n_target_stations, n_timesteps)
-        # y_locs: Tensor (n_target_stations, 2)
-        n_target_stations = self.data["y_locs"].size(0)
-        n_timesteps = self.data["y"].size(1)
+        # X_feats: Tensor (n_stations, data_len, inframe_size, n_features)
+        # X_locs: Tensor (n_stations, 2)
+        # X_masks: Tensor (n_stations, data_len)
+        # y: Tensor (data_len, outframe_size)
+        # y_locs: Tensor (data_len, 2)
 
-        tar_idx = index % n_target_stations
-        sample_idx = index // n_target_stations
-
-        src_start_idx = sample_idx * self.outframe_size
-        src_end_idx = src_start_idx + self.inframe_size
-        tar_start_idx = src_end_idx
-        tar_end_idx = tar_start_idx + self.outframe_size
-
-        if tar_end_idx > n_timesteps:
+        if index >= len(self):
             raise IndexError
         
-        X_feats, X_locs = self._get_features(self.data["X_feats"], self.data["X_locs"], src_start_idx, src_end_idx)
-        gt_target = self.data["y"][tar_idx][tar_start_idx : tar_end_idx]
+        X_feats = normalize_datatensor(self.data["X_feats"][:, index], self.feature_cols, self.mean_, self.std_)
+        X_feats.nan_to_num_(nan=0)
+
+        gt_target = self.data["y"][index]
         norm_target = normalize_datatensor(gt_target.unsqueeze(-1), ["PM2.5"], self.mean_, self.std_).squeeze(-1)
 
         return {
             "features": X_feats,
-            "src_locs": X_locs,
-            "tar_loc": self.data["y_locs"][tar_idx],
+            "src_locs": self.data["X_locs"],
+            "src_masks": self.data["X_masks"][:, index],
+            "tar_loc": self.data["y_locs"][index],
             "target": norm_target,
-            "gt_target": gt_target
+            "gt_target": gt_target,
         }
 
     def _get_testing_item(self, index):
         # input: list of Dict
-            # X_feats: dict {station_name: feat (Tensor)} with feat.shape == (n_timesteps, n_features)
-            # X_locs: dict {station_name: loc (Tensor)} with loc.shape == (2)
+            # X_feats: Tensor (n_stations, n_timesteps, n_features)
+            # X_locs: Tensor (n_stations, 2)
+            # X_masks: Tensor (n_stations, n_frames)
         # y_locs: Tensor (n_target_stations, 2)
 
         dt = self.data["input"][index]
-        X_feats, X_locs = self._get_features(dt["X_feats"], dt["X_locs"], 0, None)
+        X_feats = normalize_datatensor(dt["X_feats"], self.feature_cols, self.mean_, self.std_)
+        X_feats.nan_to_num_(nan=0)
 
         return {
             "features": X_feats,
-            "src_locs": X_locs,
+            "src_locs": dt["X_locs"],
+            "src_masks": dt["X_masks"].squeeze(-1),
             "tar_locs": self.data["y_locs"],
             "folder_idx": self.data["folder_idx"][index],
         }
-
-    def _get_features(self,
-        X_feats: Dict[str, torch.Tensor],
-        X_locs: Dict[str, torch.Tensor],
-        start_idx: int,
-        end_idx: int
-    ):
-        feats = torch.tensor([])
-        locs = torch.tensor([])
-
-        # Kiểm tra nếu phần trăm missing data của trạm > droprate thì bỏ trạm đó
-        for stname, all_feat in X_feats.items():
-            # feat.shape == (n_samples, n_features)
-            feat = all_feat[start_idx : end_idx].clone()
-            nan_count = feat.isnan().sum(0)
-            nan_rate = nan_count.max().item() / self.inframe_size
-
-            if nan_rate < self.droprate:
-                if self.fillnan_fn is not None:
-                    for i in range(len(nan_count)):
-                        if nan_count[i] > 0:
-                            feat[:, i] = torch.tensor(self.fillnan_fn(pd.Series(feat[:, i])).to_numpy())
-
-                feats = torch.cat((feats, feat.unsqueeze(0)), dim=0)
-                locs = torch.cat((locs, X_locs[stname].unsqueeze(0)), dim=0)
-
-        feats = normalize_datatensor(feats, self.feature_cols, self.mean_, self.std_)
-
-        return feats, locs
 
 
     def preprocess_training_data(self, train_root: str, fillnan_fn: Callable = None):
         raw_data = air_quality_train_data(train_root)
 
-        X_feats = {}
-        X_locs = {}
+        # X_feats.shape == (n_src_stations, n_timesteps, n_features)
+        X_feats = torch.tensor([])
+        X_locs = torch.tensor([])
+        X_masks = torch.tensor([], dtype=torch.bool)
 
         for stname, station in raw_data["input"].items():
+            mask_ = None
+
+            for col in ("humidity", "temperature", "PM2.5"):
+                col_mask = self._create_mask(station["data"][col], self.inframe_size, self.outframe_size)
+
+                mask_ = col_mask if mask_ is None else torch.minimum(mask_, col_mask)
+
+            # mask_.shape == (n_frame,)
             # feat.shape == (9000, 3)
             # loc.shape == (2)
             feat, loc = self._preprocess_station_data(
-                station["data"], station["location"])
+                station["data"], station["location"], fillnan_fn)
 
-            X_feats[stname] = feat
-            X_locs[stname] = loc
+            X_feats = torch.cat((X_feats, feat.unsqueeze(0)), dim=0)
+            X_locs = torch.cat((X_locs, loc.unsqueeze(0)), dim=0)
+            X_masks = torch.cat((X_masks, mask_.unsqueeze(0)), dim=0)
 
+        # y.shape == (n_target_stations, n_timesteps)
         y = torch.tensor([])
         y_locs = torch.tensor([])
+        y_masks = torch.tensor([])
 
         for station in raw_data["output"].values():
+            mask_ = self._create_mask(station["data"]["PM2.5"][self.inframe_size:], self.outframe_size, self.outframe_size)
             feat, loc = self._preprocess_station_data(
                 station["data"], station["location"], fillnan_fn)
 
             pm25_idx = self.feature_cols.index("PM2.5")
             y = torch.cat((y, feat[:, pm25_idx].unsqueeze(0)), dim=0)
             y_locs = torch.cat((y_locs, loc.unsqueeze(0)), dim=0)
+            y_masks = torch.cat((y_masks, mask_.unsqueeze(0)), dim=0)
 
-        # data_length = n_target_stations * (num_timesteps - inframe_size) / outframe_size
-        data_length = int((y.size(1) - self.inframe_size) / self.outframe_size) * y_locs.size(0)
+        n_frames = y_masks.size(1)
+        # convert X_feats, y from n_timesteps to n_frames
+        __X_feats = torch.zeros((X_feats.size(0), n_frames, self.inframe_size, X_feats.size(-1)))
+
+        for i in range(n_frames):
+            start_idx = i * self.outframe_size
+            end_idx = start_idx + self.inframe_size
+
+            __X_feats[:, i] = X_feats[:, start_idx : end_idx].clone()
+
+        # X_feats.shape == (n_src_stations, n_frames, inframe_size, n_features)
+        # X_masks.shape == (n_src_stations, n_frames)
+        # y.shape == (n_target_stations, n_frames, outframe_size)
+        # y_masks.shape == (n_target_stations, n_frames)
+        y = y[:, self.inframe_size:].reshape(-1, n_frames, self.outframe_size)
+        X_feats = __X_feats
+        X_masks = X_masks[:, :n_frames]
+
+        data_length = y_masks.sum().item().__int__()
+
+        __X_feats = X_feats.new_zeros(X_feats.size(0), data_length, self.inframe_size, X_feats.size(-1))
+        __X_masks = X_masks.new_zeros(X_masks.size(0), data_length)
+        __y = y.new_zeros(data_length, self.outframe_size)
+        __y_locs = y_locs.new_zeros(data_length, 2)
+
+        n_target_stations = y.size(0)
+        sample_idx = 0
+        for i in range(n_frames):
+            for j in range(n_target_stations):
+                if y_masks[j, i] == 1:
+                    __X_feats[:, sample_idx] = X_feats[:, i]
+                    __X_masks[:, sample_idx] = X_masks[:, i]
+                    __y[sample_idx] = y[j, i]
+                    __y_locs[sample_idx] = y_locs[j]
+
+                    sample_idx += 1
 
         return {
-            "X_feats": X_feats,
+            "X_feats": __X_feats,
             "X_locs": X_locs,
-            "y": y,
-            "y_locs": y_locs,
+            "X_masks": __X_masks,
+            "y": __y,
+            "y_locs": __y_locs,
         }, data_length
 
     def preprocess_testing_data(self, test_root: str, train_root: str, fillnan_fn: Callable = None):
@@ -176,19 +194,28 @@ class AirQualityDataset(Dataset):
 
         X_items = []
         for elm in raw_data["input"]:
-            X_feats = {}
-            X_locs = {}
+            X_feats = torch.tensor([])
+            X_locs = torch.tensor([])
+            X_masks = torch.tensor([], dtype=torch.bool)
 
             for stname, station in elm.items():
-                feat, loc = self._preprocess_station_data(
-                    station["data"], station["location"])
+                mask_ = None
+                for col in ("humidity", "temperature", "PM2.5"):
+                    col_mask = self._create_mask(station["data"][col], self.inframe_size, self.outframe_size)
 
-                X_feats[stname] = feat
-                X_locs[stname] = loc
+                    mask_ = col_mask if mask_ is None else torch.minimum(mask_, col_mask)
+
+                feat, loc = self._preprocess_station_data(
+                    station["data"], station["location"], fillnan_fn)
+
+                X_feats = torch.cat((X_feats, feat.unsqueeze(0)), dim=0)
+                X_locs = torch.cat((X_locs, loc.unsqueeze(0)), dim=0)
+                X_masks = torch.cat((X_masks, mask_.unsqueeze(0)), dim=0)
 
             X_items.append({
                 "X_feats": X_feats,
                 "X_locs": X_locs,
+                "X_masks": X_masks,
             })
 
         y_locs = torch.tensor([])
@@ -201,7 +228,8 @@ class AirQualityDataset(Dataset):
 
         return {
             "input": X_items,
-            "y_locs": y_locs
+            "y_locs": y_locs,
+            "folder_idx": raw_data["folder_idx"]
         }, data_length
 
     def _preprocess_station_data(self, df: pd.DataFrame, location: Tuple[float, float], fillnan_fn: Callable = None):
@@ -221,12 +249,43 @@ class AirQualityDataset(Dataset):
 
         return features, loc
 
+    def _create_mask(self, x: pd.Series, frame_size: int, stride: int):
+        """
+        Tạo mask cho từng frame
+
+        Args:
+            x: pandas.Series (n_timesteps,)
+
+        Returns:
+            mask: Tensor (n_frames,)
+        """
+
+        mask = []
+        start_idx = 0
+
+        while True:
+            end_idx = start_idx + frame_size
+
+            if end_idx > len(x):
+                break
+
+            nan_rate = x[start_idx : end_idx].isna().sum() / frame_size
+            if nan_rate > self.droprate:
+                mask.append(False)
+            else:
+                mask.append(True)
+
+            start_idx += stride
+
+        return torch.tensor(mask, dtype=torch.bool)
+
 
 class AirQualityDataModule(LightningDataModule):
     def __init__(self,
         rootdir: str,
         normalize_mean: Dict[str, float],
         normalize_std: Dict[str, float],
+        droprate: float,
         fillnan_fn: Callable = None,
         train_ratio: float = 0.75,
         batch_size: int = 32,
@@ -239,12 +298,14 @@ class AirQualityDataModule(LightningDataModule):
         self.normalize_std = normalize_std
         self.train_ratio = train_ratio
         self.fillnan_fn = fillnan_fn
+        self.droprate = droprate
 
     def setup(self, stage: Optional[str] = None):
         datafull = AirQualityDataset(
             self.rootdir,
             self.normalize_mean,
             self.normalize_std,
+            self.droprate,
             data_set="train",
             fillnan_fn=self.fillnan_fn
         )
@@ -308,7 +369,7 @@ if __name__ == "__main__":
         normalize_mean={"humidity": 0, "temperature": 0, "PM2.5": 0},
         normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
         fillnan_fn=lambda x: x.interpolate(option="spline").bfill(),
-        data_set="test"
+        data_set="train"
     )
 
     print(dts[0])

@@ -1,7 +1,7 @@
 from typing import Dict
 import torch
 from pytorch_forecasting.metrics import MAE, MAPE, RMSE
-from pytorch_forecasting.metrics.base_metrics import MultiHorizonMetric
+from pytorch_forecasting.metrics import MultiHorizonMetric
 
 
 class MultiMetrics:
@@ -52,6 +52,9 @@ class R2(MultiHorizonMetric):
 
 
 class MDAPE(MultiHorizonMetric):
+    def __init__(self, reduction="none", **kwargs):
+        super().__init__(reduction=reduction, **kwargs)
+
     def loss(self, y_pred: Dict[str, torch.Tensor], target):
         loss = (self.to_prediction(y_pred) - target).abs() / \
             (target + 1e-8).abs()

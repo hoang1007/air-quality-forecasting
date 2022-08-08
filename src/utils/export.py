@@ -17,7 +17,11 @@ def export(export_dir: str, model, data: Dataset):
         os.makedirs(curdir)
 
         for tar_station_idx in range(item["tar_locs"].size(0)):
-            predicted = model.predict(item["features"], item["src_locs"], item["tar_locs"][tar_station_idx])
+            predicted = model.predict(
+                item["features"],
+                item["src_locs"],
+                item["tar_locs"][tar_station_idx],
+                item["src_masks"])
 
             df = pd.DataFrame.from_dict({"PM2.5": predicted.tolist()})
 

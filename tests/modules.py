@@ -1,6 +1,6 @@
 import unittest
 import torch
-from model.layers import InverseDistanceAttention
+from model.aqf.layers import InverseDistanceAttention
 
 class ModuleTest(unittest.TestCase):
     def test_invdist_attention(self):
