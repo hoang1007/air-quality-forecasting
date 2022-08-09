@@ -21,17 +21,21 @@ training:
   lstm_num_layers: 2
   lstm_lookup_size: 10
   lstm_output_size: 512
+  
+  # Inverse Distance Config
+  aidw_output_size: 128
+  idw_beta: 2.0
 
   fusion_size: 64
   output_size: 24
 
   optim:
-    lr: 0.001
+    lr: 0.0001
     scheduler: "plateau"
     steplr:
       step_size: 50
     plateau:
-      patience: 10
+      patience: 4
       eps: 0.0000001 # 1e-7
       monitor: "mdape"
 

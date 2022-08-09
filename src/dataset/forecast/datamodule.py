@@ -33,10 +33,11 @@ class AirQualityDataset(Dataset):
         if cachepath is not None and os.path.isfile(cachepath):
             self.data, self._data_len = torch.load(cachepath)
         else:
-            if data_set == "train":
+            if data_set in ("train", "val", "trainval"):
                 self.data, self._data_len = self.preprocess_training_data(
                     os.path.join(rootdir, "data-train"),
-                    fillnan_fn,
+                    data_set,
+                    fillnan_fn
                 )
             elif data_set == "test":
                 self.data, self._data_len = self.preprocess_testing_data(
@@ -51,7 +52,7 @@ class AirQualityDataset(Dataset):
         return self._data_len
 
     def __getitem__(self, index):
-        if self.data_set == "train":
+        if self.data_set in ("train", "val", "trainval"):
             return self._get_training_item(index)
         elif self.data_set == "test":
             return self._get_testing_item(index)
@@ -81,6 +82,8 @@ class AirQualityDataset(Dataset):
             "tar_loc": self.data["y_locs"][index],
             "target": norm_target,
             "gt_target": gt_target,
+            "frame_idx": self.data["frame_ids"][index],
+            "target_idx": self.data["target_ids"][index]
         }
 
     def _get_testing_item(self, index):
@@ -103,8 +106,15 @@ class AirQualityDataset(Dataset):
         }
 
 
-    def preprocess_training_data(self, train_root: str, fillnan_fn: Callable = None):
+    def preprocess_training_data(self, train_root: str, data_set: str, fillnan_fn: Callable = None):
         raw_data = air_quality_train_data(train_root)
+
+        if data_set == "train":
+            target_ids = [0, 1]
+        elif data_set == "val":
+            target_ids = [2, 3]
+        elif data_set == "trainval":
+            target_ids = [0, 1, 2, 3]
 
         # X_feats.shape == (n_src_stations, n_timesteps, n_features)
         X_feats = torch.tensor([])
@@ -162,24 +172,30 @@ class AirQualityDataset(Dataset):
         X_feats = __X_feats
         X_masks = X_masks[:, :n_frames]
 
-        data_length = y_masks.sum().item().__int__()
-
-        __X_feats = X_feats.new_zeros(X_feats.size(0), data_length, self.inframe_size, X_feats.size(-1))
-        __X_masks = X_masks.new_zeros(X_masks.size(0), data_length)
-        __y = y.new_zeros(data_length, self.outframe_size)
-        __y_locs = y_locs.new_zeros(data_length, 2)
+        __X_feats = []
+        __X_masks = []
+        __y = []
+        __y_locs = []
+        frame_ids = []
+        target_station_ids = []
 
         n_target_stations = y.size(0)
-        sample_idx = 0
         for i in range(n_frames):
             for j in range(n_target_stations):
-                if y_masks[j, i] == 1:
-                    __X_feats[:, sample_idx] = X_feats[:, i]
-                    __X_masks[:, sample_idx] = X_masks[:, i]
-                    __y[sample_idx] = y[j, i]
-                    __y_locs[sample_idx] = y_locs[j]
+                if j in target_ids and y_masks[j, i] == 1:
+                    __X_feats.append(X_feats[:, i])
+                    __X_masks.append(X_masks[:, i])
+                    __y.append(y[j, i])
+                    __y_locs.append(y_locs[j])
+                    frame_ids.append(i)
+                    target_station_ids.append(j)
 
-                    sample_idx += 1
+        data_length = len(__y)
+
+        __X_feats = torch.stack(__X_feats, dim=1)
+        __X_masks = torch.stack(__X_masks, dim=1)
+        __y = torch.stack(__y, dim=0)
+        __y_locs = torch.stack(__y_locs, dim=0)
 
         return {
             "X_feats": __X_feats,
@@ -187,6 +203,8 @@ class AirQualityDataset(Dataset):
             "X_masks": __X_masks,
             "y": __y,
             "y_locs": __y_locs,
+            "frame_ids": frame_ids,
+            "target_ids": target_station_ids
         }, data_length
 
     def preprocess_testing_data(self, test_root: str, train_root: str, fillnan_fn: Callable = None):
@@ -288,6 +306,7 @@ class AirQualityDataModule(LightningDataModule):
         droprate: float,
         fillnan_fn: Callable = None,
         train_ratio: float = 0.75,
+        split_mode="station",
         batch_size: int = 32,
     ):
         super().__init__()
@@ -299,21 +318,43 @@ class AirQualityDataModule(LightningDataModule):
         self.train_ratio = train_ratio
         self.fillnan_fn = fillnan_fn
         self.droprate = droprate
+        self.split_mode = split_mode
 
     def setup(self, stage: Optional[str] = None):
-        datafull = AirQualityDataset(
-            self.rootdir,
-            self.normalize_mean,
-            self.normalize_std,
-            self.droprate,
-            data_set="train",
-            fillnan_fn=self.fillnan_fn
-        )
+        if self.split_mode == "timestamp":
+            datafull = AirQualityDataset(
+                self.rootdir,
+                self.normalize_mean,
+                self.normalize_std,
+                self.droprate,
+                data_set="trainval",
+                fillnan_fn=self.fillnan_fn
+            )
 
-        train_size = int(len(datafull) * self.train_ratio)
-        val_size = len(datafull) - train_size
+            train_size = int(len(datafull) * self.train_ratio)
+            val_size = len(datafull) - train_size
 
-        self.data_train, self.data_val = random_split(datafull, [train_size, val_size])
+            self.data_train, self.data_val = random_split(datafull, [train_size, val_size])
+        elif self.split_mode == "station":
+            self.data_train = AirQualityDataset(
+                self.rootdir,
+                self.normalize_mean,
+                self.normalize_std,
+                self.droprate,
+                data_set="train",
+                fillnan_fn=self.fillnan_fn
+            )
+
+            self.data_val = AirQualityDataset(
+                self.rootdir,
+                self.normalize_mean,
+                self.normalize_std,
+                self.droprate,
+                data_set="val",
+                fillnan_fn=self.fillnan_fn
+            )
+        else:
+            raise ValueError
 
     def train_dataloader(self):
         return DataLoader(self.data_train, batch_size=self.batch_size, num_workers=2)

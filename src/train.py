@@ -22,11 +22,12 @@ def run(cfg):
         normalize_std=cfg.data.normalize_std,
         droprate=0.5,
         fillnan_fn=lambda x : x.interpolate(option="spline").bfill(),
+        split_mode="station",
         batch_size=cfg.training.batch_size
     )
 
-    logger = TensorBoardLogger("/home/hoang/Documents/CodeSpace/air-quality-forecasting/logs", name="dqaff")
-    trainer = pl.Trainer(logger=logger, accelerator="cpu", max_epochs=2)
+    logger = TensorBoardLogger("/home/hoang/Documents/CodeSpace/air-quality-forecasting/logs", name="dqaff", version="v3")
+    trainer = pl.Trainer(logger=logger, accelerator="cpu", max_epochs=10)
     trainer.fit(model, dtm)
 
     # export(export_dir="/home/hoang/Documents/CodeSpace/air-quality-forecasting/submit", model=model, data=dts)

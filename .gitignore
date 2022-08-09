@@ -6,6 +6,9 @@ __pycache__/
 # Hydra Logdir
 outputs/
 
+# Tensorboard Logdir
+logs/
+
 # C extensions
 *.so
 

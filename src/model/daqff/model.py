@@ -16,6 +16,7 @@ class DAQFFModel(LightningModule):
         super().__init__()
 
         self.extractor = Conv1dExtractor(config)
+        self.aid_layer = AIDWLayer(config)
         self.st_layer = SpatialTemporalLayer(config, config["extractor_size"])
 
         self.linear1 = nn.Linear(config["lstm_output_size"], config["output_size"])
@@ -34,7 +35,8 @@ class DAQFFModel(LightningModule):
         src_masks: torch.Tensor
     ):  
         features = self.extractor(x)
-        features = self.st_layer(features, src_locs, tar_loc, src_masks)
+        features = self.aid_layer(features, src_locs, tar_loc, src_masks)
+        features = self.st_layer(features)
 
         out = self.linear1(features)
 
@@ -44,6 +46,33 @@ class DAQFFModel(LightningModule):
         mape = (input - target).abs().sum(-1)
 
         return mape.mean()
+
+    def predict(self,
+                features: torch.Tensor,
+                src_locs: torch.Tensor,
+                tar_loc: torch.Tensor,
+                src_masks: torch.Tensor):
+        '''
+        Args:
+            features: Tensor (n_stations, n_timesteps, n_features)
+            src_locs: Tensor (n_stations, 2)
+            tar_loc: Tensor (2)
+
+        Returns:
+            output: Tensor (n_output_timesteps,)
+        '''
+        self.eval()
+        with torch.no_grad():
+            # add batch dim
+            features = features.unsqueeze(0).to(self.device)
+            src_locs = src_locs.unsqueeze(0).to(self.device)
+            tar_loc = tar_loc.unsqueeze(0).to(self.device)
+            src_masks = src_masks.unsqueeze(0).to(self.device)
+
+            output = self(features, src_locs, tar_loc, src_masks).squeeze(0)
+            # inverse transforms
+            output = output * self.target_normalize_std + self.target_normalize_mean
+        return output
 
     def training_step(self, batch, batch_idx):
         outputs = self(batch["features"], batch["src_locs"], batch["tar_loc"], batch["src_masks"])
