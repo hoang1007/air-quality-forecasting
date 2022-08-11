@@ -25,9 +25,9 @@ class InverseDistanceAttention(nn.Module):
 
         self.attention = nn.Sequential(
             nn.Linear(n_features, self.ff_dim),
-            nn.Sigmoid(),
+            nn.ReLU(),
             nn.Linear(self.ff_dim, 1),
-            nn.Sigmoid()
+            nn.ReLU()
         )
         
         # self.linear = nn.Linear(n_features, n_features)
@@ -98,7 +98,7 @@ class InverseDistanceAttention(nn.Module):
 
             # __attn.shape == (src_len', 1)
             __attn = attn[i, __src_masks] * inv_dists
-            outputs[i] = (features[i, __src_masks] * torch.softmax(__attn, dim=0)).sum(0)
+            outputs[i] = (features[i, __src_masks] * scale_softmax(__attn, dim=0)).sum(0)
 
         # outputs = self.linear((attn_scores * features).sum(1))
         # outputs = self.dropout(outputs)

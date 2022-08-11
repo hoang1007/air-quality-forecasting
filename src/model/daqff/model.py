@@ -1,140 +1,81 @@
 from torch import nn
+import torch.nn.functional as F
 from .layers import *
-from pytorch_lightning import LightningModule
-from utils.metrics import MultiMetrics
+from utils.functional import inverse_distance_weighted
+from model import BaseAQFModel
 
 
-class DAQFFModel(LightningModule):
+class DAQFFModel(BaseAQFModel):
     """
     Args:
-        x: Tensor (batch_size, n_stations1, seq_len, n_features)
-    
+        x: Tensor (batch_size, n_stations, seq_len, n_features)
+        locs: Tensor (batch_size, n_stations, 2)
+        masks: Tensor (batch_size, n_stations)
     Returns:
-        outputs: Tensor (batch_size, output_len)
+        outputs: Tensor (batch_size, n_stations, output_len)
     """
     def __init__(self, config, target_normalize_mean: float, target_normalize_std: float):
-        super().__init__()
+        super().__init__(config, target_normalize_mean, target_normalize_std)
 
-        self.extractor = Conv1dExtractor(config)
-        self.aid_layer = AIDWLayer(config)
-        self.st_layer = SpatialTemporalLayer(config, config["extractor_size"])
+        self.extractor = Conv1dExtractor(config, config["n_features"]) # spatial feat?
+        self.st_layer = SpatialTemporalLayer(config, config["n_stations"])
 
-        self.linear1 = nn.Linear(config["lstm_output_size"], config["output_size"])
-
-        self.target_normalize_mean = target_normalize_mean
-        self.target_normalize_std = target_normalize_std
-        self.metrics = MultiMetrics()
-        self.optim_config = config["optim"]
-        self.save_hyperparameters()
+        self.linear1 = nn.Linear(config["lstm_output_size"], config["n_stations"])
+        self.linear2 = nn.Linear(1, config["output_size"])
 
     def forward(
         self,
         x: torch.Tensor,
-        src_locs: torch.Tensor,
-        tar_loc: torch.Tensor,
-        src_masks: torch.Tensor
-    ):  
+        locs: torch.Tensor
+    ): 
+        # features.shape == (batch_size, extractor_size, n_stations)
         features = self.extractor(x)
-        features = self.aid_layer(features, src_locs, tar_loc, src_masks)
+
+        # corr_weights.shape == (batch_size, n_stations, n_stations)
+        corr_weigts = inverse_distance_weighted(locs, locs, beta=1.0)
+        features = torch.bmm(features, corr_weigts)
+
         features = self.st_layer(features)
 
-        out = self.linear1(features)
+        out = self.linear1(features).unsqueeze(-1)
+        out = self.linear2(out)
 
         return out
 
-    def _compute_loss(self, input: torch.Tensor, target: torch.Tensor):
-        mape = (input - target).abs().sum(-1)
+    def compute_distances(self, src_locs: torch.Tensor, tar_locs: torch.Tensor):
+        tar_length = tar_locs.size(1)
+        # expand src_locs to shape (batch_size, src_length, tar_length, 2)
+        src_locs = src_locs.unsqueeze(-2)
+        new_shape = list(src_locs.shape)
+        new_shape[-2] = tar_length
+        src_locs = src_locs.expand(new_shape)
 
-        return mape.mean()
+        # tar_locs.shape == (batch_size, 1, tar_length, 2)
+        tar_locs = tar_locs.unsqueeze(1)
 
-    def predict(self,
-                features: torch.Tensor,
-                src_locs: torch.Tensor,
-                tar_loc: torch.Tensor,
-                src_masks: torch.Tensor):
-        '''
-        Args:
-            features: Tensor (n_stations, n_timesteps, n_features)
-            src_locs: Tensor (n_stations, 2)
-            tar_loc: Tensor (2)
+        # dists.shape == (batch_size, src_length, tar_length)
+        dists = (src_locs - tar_locs).pow(2).sum(dim=-1).sqrt()
 
-        Returns:
-            output: Tensor (n_output_timesteps,)
-        '''
-        self.eval()
-        with torch.no_grad():
-            # add batch dim
-            features = features.unsqueeze(0).to(self.device)
-            src_locs = src_locs.unsqueeze(0).to(self.device)
-            tar_loc = tar_loc.unsqueeze(0).to(self.device)
-            src_masks = src_masks.unsqueeze(0).to(self.device)
+        return dists
 
-            output = self(features, src_locs, tar_loc, src_masks).squeeze(0)
-            # inverse transforms
-            output = output * self.target_normalize_std + self.target_normalize_mean
-        return output
+    def compute_loss(self, input: torch.Tensor, target: torch.Tensor, masks: torch.Tensor):
+        # shape == (batch_size, n_stations, output_size)
+        return F.mse_loss(input[:, masks], target[:, masks])
 
     def training_step(self, batch, batch_idx):
-        outputs = self(batch["features"], batch["src_locs"], batch["tar_loc"], batch["src_masks"])
+        preds = self(batch["features"], batch["src_locs"])
 
-        loss = self._compute_loss(outputs, batch["target"])
+        loss = self.compute_loss(preds, batch["src_nexts"])
+
+        self.log("loss", loss.item())
 
         return loss
 
-    def training_epoch_end(self, outputs):
-        loss = 0
-
-        for step in outputs:
-            loss += step["loss"].item()
-
-        loss /= len(outputs)
-
-        self.log("loss", loss)
-
     def validation_step(self, batch, batch_idx):
-        # outputs.shape == (batch_size, n_pred_steps)
-        outputs = self(batch["features"], batch["src_locs"], batch["tar_loc"], batch["src_masks"])
+        preds = self(batch["features"], batch["src_locs"])
 
-        # inverse transform
-        preds = outputs * self.target_normalize_std + self.target_normalize_mean
+        preds = preds * self.target_normalize_std + self.target_normalize_mean
 
-        return self.metrics(preds, batch["gt_target"])
+        mae = (preds - batch["src_nexts"]).abs().mean()
 
-    def validation_epoch_end(self, val_outputs):
-        metrics = {}
-
-        for batch in val_outputs:
-            for metric in batch:
-                if metric in metrics:
-                    metrics[metric].append(batch[metric])
-                else:
-                    metrics[metric] = [batch[metric]]
-
-        for metric in metrics:
-            metrics[metric] = sum(metrics[metric]) / len(metrics[metric])
-
-        self.log_dict(metrics)
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.parameters(), lr=self.optim_config["lr"])
-
-        print("Using", self.optim_config["scheduler"])
-        
-        if self.optim_config["scheduler"] == "plateau":
-            scheduler_cfg = self.optim_config["plateau"]
-            scheduler = {"scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer,
-                patience=scheduler_cfg["patience"],
-                eps=scheduler_cfg["eps"]
-            ),
-                "monitor": scheduler_cfg["monitor"]}
-        else:
-            scheduler_cfg = self.optim_config["steplr"]
-            scheduler = {"scheduler": torch.optim.lr_scheduler.StepLR(
-                optimizer, step_size=scheduler_cfg["step_size"])}
-        
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": scheduler
-        }
+        return {"mae": mae}

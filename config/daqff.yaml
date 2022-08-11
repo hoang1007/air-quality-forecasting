@@ -5,25 +5,25 @@ training:
   n_features: 7
   seq_len: 168
 
+  dropout: 0.3
   # Convolution Extractor Config
-  channels1: 32
+  channels1: 64
   kernel_size1: 5
-  channels2: 16
+  channels2: 32
   kernel_size2: 3
-  channels3: 8
+  channels3: 16
   kernel_size3: 1
 
   extractor_size: 128
-  extractor_dropout: 0.2
 
   # Spatial Temporal Config
-  lstm_hidden_size: 32
-  lstm_num_layers: 2
-  lstm_lookup_size: 10
+  lstm_hidden_size: 128
+  lstm_num_layers: 3
+  lstm_lookup_size: 2
   lstm_output_size: 512
   
   # Inverse Distance Config
-  aidw_output_size: 128
+  ff_size: 32
   idw_beta: 2.0
 
   fusion_size: 64
@@ -31,9 +31,15 @@ training:
 
   optim:
     lr: 0.0001
+    optimizer: "sgd"
+    sgd:
+      momentum: 0.8
+      weight_decay: 0.9
+    adam:
+      weight_decay: 0.9
     scheduler: "plateau"
     steplr:
-      step_size: 50
+      step_size: 20
     plateau:
       patience: 4
       eps: 0.0000001 # 1e-7
@@ -48,3 +54,12 @@ data:
     temperature: 5.94
     humidity: 15.43
     PM2.5: 42.23
+
+  # normalize_mean:
+  #   temperature: 8.8
+  #   humidity: 9.05
+  #   PM2.5: 0.55
+  # normalize_std:
+  #   temperature: 37.11
+  #   humidity: 90.95
+  #   PM2.5: 269.45

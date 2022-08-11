@@ -5,7 +5,7 @@ from utils.functional import scale_softmax
 
 
 class Conv1dExtractor(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, n_features):
         """
         Args:
             x: Tensor (batch_size, src_len, seq_len, n_features)
@@ -16,7 +16,7 @@ class Conv1dExtractor(nn.Module):
         super().__init__()
 
         self.conv1 = nn.Conv1d(
-            in_channels=config["n_features"],
+            in_channels=n_features,
             out_channels=config["channels1"],
             kernel_size=config["kernel_size1"],
             padding=2
@@ -42,7 +42,7 @@ class Conv1dExtractor(nn.Module):
 
         self.linear = nn.Linear(
             config["channels3"] * config["seq_len"], config["extractor_size"])
-        self.dropout = nn.Dropout(p=config["extractor_dropout"])
+        self.dropout = nn.Dropout(p=config["dropout"])
 
     def forward(self, x: torch.Tensor):
         src_len = x.size(1)
@@ -72,22 +72,23 @@ class AIDWLayer(nn.Module):
     def __init__(self, config):
         """
         Args:
-            features: Tensor (batch_size, seq_len, src_len)
+            features: Tensor (batch_size, src_len, seq_len)
             src_locs: Tensor (batch_size, src_len, 2)
             tar_loc: Tensor (batch_size, 2)
             src_masks: Tensor (batch_size, src_len)
 
         Returns:
-            outputs: Tensor (batch_size, seq_len, n_features)
+            outputs: Tensor (batch_size, seq_len)
         """
         super().__init__()
 
-        self.output_size = config["aidw_output_size"]
         self.src_len = config["n_stations"]
+        self.seq_len = config["output_size"]
         self.beta = config["idw_beta"]
 
-        self.register_parameter(
-            "linear", self._init_feedforward(self.src_len, self.output_size))
+        # self.register_parameter(
+        #     "linear", self._init_feedforward(self.seq_len, 1))
+        self.linear = nn.Linear(self.seq_len, 1)
 
     def forward(
         self,
@@ -99,21 +100,33 @@ class AIDWLayer(nn.Module):
         batch_size = features.size(0)
         tar_locs = tar_loc.unsqueeze(1)  # only support 1 target location
 
-        out = features.new_zeros(batch_size, features.size(1), self.output_size)
+        out = features.new_zeros(batch_size, features.size(2))
 
         for i in range(batch_size):
             __src_masks = src_masks[i]
             __src_locs = src_locs[i, __src_masks].unsqueeze(0)
             __tar_loc = tar_locs[i].unsqueeze(0)
 
-            # inv_dists.shape == (src_len')
+            # inv_dists.shape == (src_len', 1)
             id_weights = self.compute_invdist_scores(
-                __src_locs, __tar_loc).squeeze()
+                __src_locs, __tar_loc).squeeze(0)
 
-            # feat.shape == (seq_len, src_len')
-            feat = features[i, :, __src_masks] * id_weights
-            out[i] = torch.matmul(feat, self.linear[__src_masks])
+            # feat.shape == (src_len', seq_len)
+            # attn = torch.matmul(features[i, __src_masks], self.linear)
+            attn = self.linear(features[i]) * __src_masks.unsqueeze(-1)
+            attn = torch.sigmoid(attn)
 
+            
+            attn[__src_masks] = scale_softmax((attn[__src_masks] * id_weights), dim=0)
+
+            # out[i] = (features[i, __src_masks] * id_weights).sum(0)
+            out[i] = (features[i] * attn).sum(0)
+            # out[i] = torch.matmul(feat.t(), self.linear[__src_masks])
+
+
+        # out = self.linear2(out).squeeze(-1)
+        # out = torch.sigmoid(out).squeeze(-1)
+        # out = (features * out.unsqueeze)
         return out
 
     def _init_feedforward(self, input_size: int, output_size: int):
@@ -141,37 +154,11 @@ class AIDWLayer(nn.Module):
 
         return scores
 
-    def locs_to_grid(self, src_locs: torch.Tensor, tar_locs: torch.Tensor):
-        num_src_locs = src_locs.size(1)
-        # (batch_size, n_locs, 2)
-        locs = torch.cat((src_locs, tar_locs), dim=1)
-
-        x_sorted = torch.sort(locs[:, :, 0], dim=-1).values
-        y_sorted = torch.sort(locs[:, :, 1], dim=-1).values
-
-        x_min = x_sorted[:, :1]
-        y_min = y_sorted[:, :1]
-
-        x_min_diff = torch.diff(x_sorted)
-        x_min_diff[x_min_diff.eq(0)] = 1e9
-        x_min_diff = x_min_diff.min(dim=-1, keepdim=True).values
-
-        y_min_diff = torch.diff(y_sorted)
-        y_min_diff[y_min_diff.eq(0)] = 1e9
-        y_min_diff = y_min_diff.min(dim=-1, keepdim=True).values
-
-        locs[:, :, 0] = torch.div(
-            locs[:, :, 0] - x_min, x_min_diff, rounding_mode="trunc")
-        locs[:, :, 1] = torch.div(
-            locs[:, :, 1] - y_min, y_min_diff, rounding_mode="trunc")
-
-        return locs[:, :num_src_locs], locs[:, num_src_locs:]
-
 
 class SpatialTemporalLayer(nn.Module):
     """
     Args:
-        x: Tensor (batch_size, seq_len, src_len)
+        x: Tensor (batch_size, seq_len, input_size)
 
     Returns:
         outputs: Tensor (batch_size, output_size)
@@ -198,7 +185,8 @@ class SpatialTemporalLayer(nn.Module):
             hidden_size=self.hidden_size,
             num_layers=self.num_layers,
             batch_first=True,
-            bidirectional=True
+            bidirectional=True,
+            dropout=config["dropout"]
         )
 
         lstm_flatten_size = (self.lookup_size + 1) * self.hidden_size * 2
