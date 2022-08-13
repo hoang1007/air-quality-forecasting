@@ -40,7 +40,7 @@ def run(cfg):
 
     # trainer.fit(model, dtm)
 
-    test_dts = AirQualityDatasetV3(
+    test_dts = AirQualityDataset2(
         rootdir="/home/hoang/Documents/CodeSpace/air-quality-forecasting/data",
         normalize_mean=cfg.data.normalize_mean,
         normalize_std=cfg.data.normalize_std,

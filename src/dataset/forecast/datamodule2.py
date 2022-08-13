@@ -10,7 +10,7 @@ from pytorch_lightning import LightningDataModule
 from dataset.raw_data import air_quality_train_data, air_quality_test_data
 
 
-class AirQualityDatasetV3(Dataset):
+class AirQualityDataset2(Dataset):
     def __init__(
         self,
         rootdir: str,
@@ -29,6 +29,7 @@ class AirQualityDatasetV3(Dataset):
         self.droprate = droprate
         self.fillnan_fn = fillnan_fn
         self.data_set = data_set
+        self.cachepath = cachepath
 
         if cachepath is not None and os.path.isfile(cachepath):
             self.data, self._data_len = torch.load(cachepath)
@@ -46,6 +47,12 @@ class AirQualityDatasetV3(Dataset):
                 )
             else:
                 raise ValueError
+
+    def save(self, path=None):
+        if path is None:
+            path = self.cachepath
+
+        torch.save((self.data, len(self)), path)
 
     def __len__(self):
         return self._data_len
@@ -318,7 +325,7 @@ class AirQualityDatasetV3(Dataset):
         return torch.tensor(mask, dtype=torch.bool)
 
 
-class AirQualityDataModuleV3(LightningDataModule):
+class AirQualityDataModule2(LightningDataModule):
     def __init__(self,
         rootdir: str,
         normalize_mean: Dict[str, float],
@@ -339,7 +346,7 @@ class AirQualityDataModuleV3(LightningDataModule):
         self.droprate = droprate
 
     def setup(self, stage: Optional[str] = None):
-        datafull = AirQualityDatasetV3(
+        datafull = AirQualityDataset2(
             self.rootdir,
             self.normalize_mean,
             self.normalize_std,
@@ -399,15 +406,3 @@ def dataframe_to_tensor(df: pd.DataFrame, usecols: List[str]):
         dim=-1)
 
     return features
-
-
-if __name__ == "__main__":
-    dts = AirQualityDatasetV3(
-        "./data",
-        normalize_mean={"humidity": 0, "temperature": 0, "PM2.5": 0},
-        normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
-        fillnan_fn=lambda x: x.interpolate(option="spline").bfill(),
-        data_set="train"
-    )
-
-    print(dts[0]["src_masks"].shape)

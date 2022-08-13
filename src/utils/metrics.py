@@ -1,7 +1,4 @@
-from typing import Dict
 import torch
-from pytorch_forecasting.metrics import MAE, MAPE, RMSE
-from pytorch_forecasting.metrics import MultiHorizonMetric
 
 
 class MultiMetrics:
@@ -16,47 +13,48 @@ class MultiMetrics:
     Returns:
         outputs (Dict[float]): Các điểm `mae`, `mape`, `rmse`, `r2`, `mdape`
     '''
+    def __init__(self, flattened: bool = True):
+        self._flattened = flattened
 
-    def __init__(self):
-        self.mae = MAE(reduction="mean")
-        self.mape = MAPE(reduction="mean")
-        self.rmse = RMSE(reduction="sqrt-mean")
-        self.r2 = R2(reduction="mean")
-        self.mdape = MDAPE(reduction="none")
-
-    def __call__(self, y_pred: torch.Tensor, y_true: torch.Tensor, weight: torch.Tensor = None):
-        if weight is not None:
-            y_pred = y_pred[weight]
-            y_true = y_true[weight]
+    def __call__(self, y_pred: torch.Tensor, y_true: torch.Tensor,):
+        if self._flattened:
+            assert len(y_pred.shape)
 
         return {
-            "mdape": self.mdape(y_pred, y_true).item(),
-            "mae": self.mae(y_pred, y_true).item(),
-            "mape": self.mape(y_pred, y_true).item(),
-            "rmse": self.rmse(y_pred, y_true).item(),
-            "r2": self.r2(y_pred, y_true).item(),
+            "mdape": mdape(y_pred, y_true),
+            "mae": mae(y_pred, y_true),
+            "mape": mape(y_pred, y_true),
+            "rmse": rmse(y_pred, y_true),
+            "r2": r2(y_pred, y_true),
         }
 
 
-class R2(MultiHorizonMetric):
-    def __init__(self, reduction="mean", **kwargs):
-        super().__init__(reduction=reduction, **kwargs)
+def r2(y_pred: torch.Tensor, y: torch.Tensor):
+    nom = (y - y_pred).pow(2).sum().item()
+    denom = (y - y.mean()).pow(2).sum().item()
 
-    def loss(self, y_pred: Dict[str, torch.Tensor], target):
-        y_pred = self.to_prediction(y_pred)
+    return nom / denom
 
-        rss = torch.pow(target - y_pred, 2)
-        tss = torch.pow(target - target.mean(dim=-1, keepdim=True), 2)
+def mdape(y_pred: torch.Tensor, y: torch.Tensor):
+    return ((y - y_pred) / y).abs().median()
 
-        return 1 - rss / (tss + 1e-8)
+def mape(y_pred: torch.Tensor, y: torch.Tensor):
+    v = ((y_pred - y) / y).abs()
 
+    v = v.sum() / v.size(0)
 
-class MDAPE(MultiHorizonMetric):
-    def __init__(self, reduction="none", **kwargs):
-        super().__init__(reduction=reduction, **kwargs)
+    return v.item()
 
-    def loss(self, y_pred: Dict[str, torch.Tensor], target):
-        loss = (self.to_prediction(y_pred) - target).abs() / \
-            (target + 1e-8).abs()
+def mae(y_pred: torch.Tensor, y: torch.Tensor):
+    err = (y_pred - y).abs()
 
-        return loss.median()
+    err = err.sum() / err.size(0)
+
+    return err.item()
+
+def rmse(y_pred: torch.Tensor, y: torch.Tensor):
+    err = (y_pred - y).pow(2)
+    err = err.sum() / err.size(0)
+    err = err.sqrt()
+
+    return err.item()

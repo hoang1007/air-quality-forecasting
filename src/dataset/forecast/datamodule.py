@@ -29,6 +29,7 @@ class AirQualityDataset(Dataset):
         self.droprate = droprate
         self.fillnan_fn = fillnan_fn
         self.data_set = data_set
+        self.cachepath = cachepath
 
         if cachepath is not None and os.path.isfile(cachepath):
             self.data, self._data_len = torch.load(cachepath)
@@ -48,6 +49,12 @@ class AirQualityDataset(Dataset):
             else:
                 raise ValueError
 
+    def save(self, path=None):
+        if path is None:
+            path = self.cachepath
+
+        torch.save((self.data, len(self)), path)
+
     def __len__(self):
         return self._data_len
 
@@ -60,17 +67,21 @@ class AirQualityDataset(Dataset):
             raise ValueError
 
     def _get_training_item(self, index):
-        # X_feats: Tensor (n_stations, data_len, inframe_size, n_features)
+        # X_feats: Tensor (data_len, n_stations, inframe_size, n_features)
         # X_locs: Tensor (n_stations, 2)
-        # X_masks: Tensor (n_stations, data_len)
+        # X_nexts: Tensor (data_len, n_stations, outframe_size)
+        # X_masks: Tensor (data_len, n_stations)
         # y: Tensor (data_len, outframe_size)
         # y_locs: Tensor (data_len, 2)
 
         if index >= len(self):
             raise IndexError
         
-        X_feats = normalize_datatensor(self.data["X_feats"][:, index], self.feature_cols, self.mean_, self.std_)
+        X_feats = normalize_datatensor(self.data["X_feats"][index], self.feature_cols, self.mean_, self.std_)
         X_feats.nan_to_num_(nan=0)
+
+        X_nexts = normalize_datatensor(self.data["X_nexts"][index].unsqueeze(-1), ["PM2.5"], self.mean_, self.std_).squeeze(-1)
+        X_nexts.nan_to_num_(nan=0)
 
         gt_target = self.data["y"][index]
         norm_target = normalize_datatensor(gt_target.unsqueeze(-1), ["PM2.5"], self.mean_, self.std_).squeeze(-1)
@@ -78,7 +89,8 @@ class AirQualityDataset(Dataset):
         return {
             "features": X_feats,
             "src_locs": self.data["X_locs"],
-            "src_masks": self.data["X_masks"][:, index],
+            "src_nexts": X_nexts,
+            "src_masks": self.data["X_masks"][index],
             "tar_loc": self.data["y_locs"][index],
             "target": norm_target,
             "gt_target": gt_target,
@@ -108,11 +120,12 @@ class AirQualityDataset(Dataset):
 
     def preprocess_training_data(self, train_root: str, data_set: str, fillnan_fn: Callable = None):
         raw_data = air_quality_train_data(train_root)
+        pm25_idx = self.feature_cols.index("PM2.5")
 
         if data_set == "train":
-            target_ids = [0, 1]
+            target_ids = [0, 1, 2]
         elif data_set == "val":
-            target_ids = [2, 3]
+            target_ids = [3]
         elif data_set == "trainval":
             target_ids = [0, 1, 2, 3]
 
@@ -149,7 +162,6 @@ class AirQualityDataset(Dataset):
             feat, loc = self._preprocess_station_data(
                 station["data"], station["location"], fillnan_fn)
 
-            pm25_idx = self.feature_cols.index("PM2.5")
             y = torch.cat((y, feat[:, pm25_idx].unsqueeze(0)), dim=0)
             y_locs = torch.cat((y_locs, loc.unsqueeze(0)), dim=0)
             y_masks = torch.cat((y_masks, mask_.unsqueeze(0)), dim=0)
@@ -157,22 +169,28 @@ class AirQualityDataset(Dataset):
         n_frames = y_masks.size(1)
         # convert X_feats, y from n_timesteps to n_frames
         __X_feats = torch.zeros((X_feats.size(0), n_frames, self.inframe_size, X_feats.size(-1)))
+        __X_nexts = torch.zeros((X_feats.size(0), n_frames, self.outframe_size))
 
         for i in range(n_frames):
             start_idx = i * self.outframe_size
             end_idx = start_idx + self.inframe_size
+            next_end_idx = end_idx + self.outframe_size
 
             __X_feats[:, i] = X_feats[:, start_idx : end_idx].clone()
+            __X_nexts[:, i] = X_feats[:, end_idx : next_end_idx, pm25_idx].clone()
 
         # X_feats.shape == (n_src_stations, n_frames, inframe_size, n_features)
+        # X_nexts.shape == (n_src_stations, n_frames, outframe_size)
         # X_masks.shape == (n_src_stations, n_frames)
         # y.shape == (n_target_stations, n_frames, outframe_size)
         # y_masks.shape == (n_target_stations, n_frames)
         y = y[:, self.inframe_size:].reshape(-1, n_frames, self.outframe_size)
         X_feats = __X_feats
+        X_nexts = __X_nexts
         X_masks = X_masks[:, :n_frames]
 
         __X_feats = []
+        __X_nexts = []
         __X_masks = []
         __y = []
         __y_locs = []
@@ -185,6 +203,7 @@ class AirQualityDataset(Dataset):
                 if j in target_ids and y_masks[j, i] == 1:
                     __X_feats.append(X_feats[:, i])
                     __X_masks.append(X_masks[:, i])
+                    __X_nexts.append(X_nexts[:, i])
                     __y.append(y[j, i])
                     __y_locs.append(y_locs[j])
                     frame_ids.append(i)
@@ -192,8 +211,9 @@ class AirQualityDataset(Dataset):
 
         data_length = len(__y)
 
-        __X_feats = torch.stack(__X_feats, dim=1)
-        __X_masks = torch.stack(__X_masks, dim=1)
+        __X_feats = torch.stack(__X_feats, dim=0)
+        __X_masks = torch.stack(__X_masks, dim=0)
+        __X_nexts = torch.stack(__X_nexts, dim=0)
         __y = torch.stack(__y, dim=0)
         __y_locs = torch.stack(__y_locs, dim=0)
 
@@ -201,6 +221,7 @@ class AirQualityDataset(Dataset):
             "X_feats": __X_feats,
             "X_locs": X_locs,
             "X_masks": __X_masks,
+            "X_nexts": __X_nexts,
             "y": __y,
             "y_locs": __y_locs,
             "frame_ids": frame_ids,
@@ -470,15 +491,3 @@ def dataframe_to_tensor(df: pd.DataFrame, usecols: List[str]):
         dim=-1)
 
     return features
-
-
-if __name__ == "__main__":
-    dts = AirQualityDataset(
-        "./data",
-        normalize_mean={"humidity": 0, "temperature": 0, "PM2.5": 0},
-        normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
-        fillnan_fn=lambda x: x.interpolate(option="spline").bfill(),
-        data_set="train"
-    )
-
-    print(dts[0])
