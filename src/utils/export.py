@@ -1,7 +1,7 @@
 import os
 import shutil
 from torch.utils.data import Dataset
-from model import BaseAQFModel
+from models import BaseAQFModel
 import pandas as pd
 import torch
 

@@ -1,5 +1,5 @@
 # %%
-from dataset import AirQualityDatasetV2, AirQualityDataModuleV2
+from dataset import AirQualityDataset2, AirQualityDataModule
 from hydra import initialize, compose
 import os
 import torch
@@ -10,15 +10,13 @@ with initialize(version_base=None, config_path="../config"):
   cfg = compose(config_name="daqff.yaml")
 
 # %%
-dtm = AirQualityDataModuleV2(
-        "/home/hoang/Documents/CodeSpace/air-quality-forecasting/data",
+dtm = AirQualityDataModule(
+        "data",
         # normalize_mean={"humidity":0, "temperature": 0, "PM2.5": 0},
         # normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
         normalize_mean=cfg.data.normalize_mean,
         normalize_std=cfg.data.normalize_std,
         droprate=1.0,
-        split_mode="timestamp",
-        fillnan_fn=lambda x: x.interpolate(option="spline").bfill(),
         train_ratio=1,
         batch_size=1
     )
@@ -33,7 +31,7 @@ class SpatialModel(nn.Module):
     def __init__(self):
         super().__init__()
         
-        weights = torch.zeros(11, 1)
+        weights = torch.zeros(11, 2)
         nn.init.xavier_uniform_(weights)
 
         self.linear = nn.parameter.Parameter(weights, requires_grad=True)
@@ -47,12 +45,16 @@ class SpatialModel(nn.Module):
     ):
         assert srcs.size(0) == 1
         src_masks = src_masks.squeeze(0)
+        # srcs.shape == (src_len, 24)
         srcs = srcs.squeeze(0)
 
-        # src_locs.shape == (src_len, 24)
-        weights = self.linear[src_masks]
-        weights = scale_softmax(weights, dim=0)
-        preds = (srcs[src_masks] * weights).sum(0)
+        # polynomial
+        srcs = torch.cat((srcs, srcs.pow(2)), dim=0)
+
+        # srcs.shape == (src_len * 2, 24)
+        weights = self.linear.flatten().unsqueeze(-1)
+        # weights = scale_softmax(weights, dim=0)
+        preds = (srcs * weights).sum(0)
 
         return preds
     
@@ -62,7 +64,7 @@ class SpatialModel(nn.Module):
         return loss
 
     def fit(self, train_dataloader, val_dataloader, n_epochs: int):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=0.0)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4, weight_decay=0.0)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2)
         criterion = self.compute_loss
 
@@ -111,18 +113,21 @@ class SpatialModel(nn.Module):
 
         return loss_log, metrics
 
-# %%
-model = SpatialModel()
+if __name__ == "__main__":
+    # %%
+    torch.manual_seed(3107)
+    torch.autograd.set_detect_anomaly(True)
+    model = SpatialModel()
 
-# %%
-loss_log, metric_log = model.fit(dtm.train_dataloader(), dtm.val_dataloader(), n_epochs=10)
+    # %%
+    loss_log, metric_log = model.fit(dtm.train_dataloader(), dtm.val_dataloader(), n_epochs=10)
 
-print(model.linear.data)
+    print(model.linear.data)
 
-# %%
-import matplotlib.pyplot as plt
-fig, ax = plt.subplots(2)
-ax[0].plot(loss_log)
-ax[1].plot(metric_log)
-fig.show()
-plt.show()
+    # %%
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(2)
+    ax[0].plot(loss_log)
+    ax[1].plot(metric_log)
+    fig.show()
+    plt.show()

@@ -9,6 +9,9 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from pytorch_lightning import LightningDataModule
 from dataset.raw_data import air_quality_train_data, air_quality_test_data
 
+def default_fillna_fn(x: pd.Series):
+    return x.interpolate(option="spline").bfill()
+
 
 class AirQualityDataset2(Dataset):
     def __init__(
@@ -18,6 +21,7 @@ class AirQualityDataset2(Dataset):
         normalize_std: Dict[str, float],
         droprate: float = 0.5,
         fillnan_fn: Callable = None,
+        fill_na: bool = True,
         data_set: str = "train",
         cachepath: str = None
     ):
@@ -27,9 +31,14 @@ class AirQualityDataset2(Dataset):
         self.mean_ = normalize_mean
         self.std_ = normalize_std
         self.droprate = droprate
-        self.fillnan_fn = fillnan_fn
         self.data_set = data_set
         self.cachepath = cachepath
+        self.fill_na = fill_na
+
+        if fillnan_fn is None and self.fill_na:
+            self.fillnan_fn = default_fillna_fn
+        else:
+            self.fillnan_fn = fillnan_fn
 
         if cachepath is not None and os.path.isfile(cachepath):
             self.data, self._data_len = torch.load(cachepath)
@@ -332,6 +341,7 @@ class AirQualityDataModule2(LightningDataModule):
         normalize_std: Dict[str, float],
         droprate: float,
         fillnan_fn: Callable = None,
+        fill_na: bool = True,
         train_ratio: float = 0.75,
         batch_size: int = 32,
     ):
@@ -343,6 +353,7 @@ class AirQualityDataModule2(LightningDataModule):
         self.normalize_std = normalize_std
         self.train_ratio = train_ratio
         self.fillnan_fn = fillnan_fn
+        self.fill_na = fill_na
         self.droprate = droprate
 
     def setup(self, stage: Optional[str] = None):
@@ -352,7 +363,8 @@ class AirQualityDataModule2(LightningDataModule):
             self.normalize_std,
             self.droprate,
             data_set="train",
-            fillnan_fn=self.fillnan_fn
+            fillnan_fn=self.fillnan_fn,
+            fill_na=self.fill_na
         )
 
         train_size = int(len(datafull) * self.train_ratio)

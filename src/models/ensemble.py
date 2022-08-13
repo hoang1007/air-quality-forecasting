@@ -1,5 +1,5 @@
 import torch
-from model import BaseAQFModel
+from models import BaseAQFModel
 
 
 class EnsembleModule:
