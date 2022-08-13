@@ -9,6 +9,10 @@ outputs/
 # Tensorboard Logdir
 logs/
 
+# Submit
+submit/
+ckpt/
+
 # C extensions
 *.so
 
