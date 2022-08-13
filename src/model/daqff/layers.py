@@ -59,7 +59,10 @@ class Conv1dExtractor(nn.Module):
             out_flatten = out3.flatten(start_dim=1)
 
             out = torch.relu(self.dropout(
-                self.linear(out_flatten))).unsqueeze(-1)
+                self.linear(out_flatten)))
+            
+            # out = out.unsqueeze(-1)
+            out = out.contiguous().view(out.size(0), out.size(1), 1)
 
             extracted.append(out)
 

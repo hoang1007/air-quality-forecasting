@@ -1,0 +1,62 @@
+training:
+  batch_size: 32
+  
+  n_stations: 11
+  n_features: 7
+  seq_len: 168
+
+  dropout: 0.3
+  # Convolution Extractor Config
+  channels1: 64
+  kernel_size1: 5
+  channels2: 32
+  kernel_size2: 3
+  channels3: 16
+  kernel_size3: 1
+
+  extractor_size: 256
+
+  # Spatial Temporal Config
+  lstm_hidden_size: 128
+  lstm_num_layers: 8
+  lstm_lookup_size: 5
+  lstm_output_size: 128
+
+  fusion_size: 64
+  output_size: 24
+  ff_size: 32
+
+  optim:
+    lr: 0.005
+    optimizer: "adam"
+    sgd:
+      momentum: 0.9
+      weight_decay: 0.7
+    adam:
+      weight_decay: 0.2
+    scheduler: "plateau"
+    steplr:
+      step_size: 20
+    plateau:
+      patience: 4
+      eps: 0.0000001 # 1e-7
+      monitor: "mae"
+
+data:
+  # normalize_mean:
+  #   temperature: 26.55
+  #   humidity: 75.77
+  #   PM2.5: 45.06
+  # normalize_std:
+  #   temperature: 5.94
+  #   humidity: 15.43
+  #   PM2.5: 42.23
+
+  normalize_mean:
+    temperature: 8.8
+    humidity: 9.05
+    PM2.5: 0.55
+  normalize_std:
+    temperature: 37.11
+    humidity: 90.95
+    PM2.5: 269.45
