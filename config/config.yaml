@@ -1,0 +1,4 @@
+defaults:
+  - model: daqff # Chọn model để chạy daqff hoặc daqff-large (được sử dụng để submit)
+mode: train # Chạy train hoặc test
+device: cpu # gpu hoặc cpu

@@ -34,3 +34,5 @@ def export(export_dir: str, model, data: Dataset, correlations: torch.Tensor):
 
             df.to_csv(os.path.join(
                 curdir, f"res_{folder_idx}_{tar_station_idx + 1}.csv"), index=False)
+
+    print(f"Exported to {export_dir} successfully.")
