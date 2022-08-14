@@ -1,8 +1,6 @@
-from random import sample
 from typing import Callable, Dict, List, Tuple, Optional
 import os
 from datetime import datetime
-import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -37,9 +35,7 @@ class AirQualityDataset(Dataset):
         self.fill_na = fill_na
 
         if fillnan_fn is None and self.fill_na:
-            self.fillnan_fn = default_fillna_fn
-        else:
-            self.fillnan_fn = fillnan_fn
+            fillnan_fn = default_fillna_fn
 
         if cachepath is not None and os.path.isfile(cachepath):
             self.data, self._data_len = torch.load(cachepath)
@@ -88,10 +84,10 @@ class AirQualityDataset(Dataset):
             raise IndexError
         
         X_feats = normalize_datatensor(self.data["X_feats"][index], self.feature_cols, self.mean_, self.std_)
-        X_feats.nan_to_num_(nan=0)
+        X_feats = X_feats.nan_to_num_(nan=0)
 
         X_nexts = normalize_datatensor(self.data["X_nexts"][index].unsqueeze(-1), ["PM2.5"], self.mean_, self.std_).squeeze(-1)
-        X_nexts.nan_to_num_(nan=0)
+        X_nexts = X_nexts.nan_to_num_(nan=0)
 
         gt_target = self.data["y"][index]
         norm_target = normalize_datatensor(gt_target.unsqueeze(-1), ["PM2.5"], self.mean_, self.std_).squeeze(-1)
@@ -117,7 +113,7 @@ class AirQualityDataset(Dataset):
 
         dt = self.data["input"][index]
         X_feats = normalize_datatensor(dt["X_feats"], self.feature_cols, self.mean_, self.std_)
-        X_feats.nan_to_num_(nan=0)
+        X_feats = X_feats.nan_to_num_(nan=0)
 
         return {
             "features": X_feats,
@@ -461,7 +457,7 @@ class AirQualityDataModule(LightningDataModule):
             raise ValueError
 
     def train_dataloader(self):
-        return DataLoader(self.data_train, batch_size=self.batch_size, num_workers=2)
+        return DataLoader(self.data_train, batch_size=self.batch_size, num_workers=1)
 
     def val_dataloader(self):
         return DataLoader(self.data_val, batch_size=self.batch_size, num_workers=1)

@@ -17,7 +17,8 @@ dtm = AirQualityDataModule(
         normalize_mean=cfg.data.normalize_mean,
         normalize_std=cfg.data.normalize_std,
         droprate=1.0,
-        train_ratio=1,
+        split_mode="timestamp",
+        train_ratio=0.75,
         batch_size=1
     )
 dtm.setup()
@@ -31,10 +32,11 @@ class SpatialModel(nn.Module):
     def __init__(self):
         super().__init__()
         
-        weights = torch.zeros(11, 2)
-        nn.init.xavier_uniform_(weights)
+        # self.linear1 = nn.Linear(2, 3)
+        w = torch.zeros(11, 1)
+        nn.init.xavier_uniform_(w)
 
-        self.linear = nn.parameter.Parameter(weights, requires_grad=True)
+        self.linear = nn.parameter.Parameter(w)
     
     def forward(
         self,
@@ -44,27 +46,35 @@ class SpatialModel(nn.Module):
         src_masks: torch.Tensor
     ):
         assert srcs.size(0) == 1
-        src_masks = src_masks.squeeze(0)
         # srcs.shape == (src_len, 24)
         srcs = srcs.squeeze(0)
 
-        # polynomial
-        srcs = torch.cat((srcs, srcs.pow(2)), dim=0)
+        # mean_ = src_locs.mean(-1)
+        # std_ = src_locs.std(-1)
 
-        # srcs.shape == (src_len * 2, 24)
-        weights = self.linear.flatten().unsqueeze(-1)
-        # weights = scale_softmax(weights, dim=0)
+        # # norm
+        # src_locs = (src_locs - mean_) / std_
+        # tar_loc = (tar_loc - mean_) / std_
+
+
+
+        weights = self.linear
+        weights = scale_softmax(weights, dim=0)
         preds = (srcs * weights).sum(0)
 
         return preds
     
-    def compute_loss(self, input, target):
-        loss = (input - target).pow(2).mean().sqrt()
+    def compute_loss(self, input: torch.Tensor, target: torch.Tensor):
+        assert input.isnan().sum() == 0
+        assert target.isnan().sum() == 0
+        loss = torch.pow((input - target), 2).mean().sqrt()
 
+        if loss.isnan().sum() > 0:
+            print(loss)
         return loss
 
     def fit(self, train_dataloader, val_dataloader, n_epochs: int):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4, weight_decay=0.0)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=0.0)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2)
         criterion = self.compute_loss
 
@@ -94,33 +104,33 @@ class SpatialModel(nn.Module):
                         rloss.clear()
                 scheduler.step()
 
-            # with tqdm(val_dataloader, leave=False) as bar:
-            #     self.eval()
-            #     with torch.no_grad():
-            #         rmetr = []
-            #         for batch_idx, batch in enumerate(bar):
-            #             if batch["target_idx"][0] == tar_idx:
-            #                 output = self(batch["src_nexts"], batch["src_locs"], batch["tar_loc"], batch["src_masks"])
+            with tqdm(val_dataloader, leave=False) as bar:
+                self.eval()
+                with torch.no_grad():
+                    rmetr = []
+                    for batch_idx, batch in enumerate(bar):
+                        if batch["target_idx"][0] == tar_idx:
+                            output = self(batch["src_nexts"], batch["src_locs"], batch["tar_loc"], batch["src_masks"])
 
-            #                 output = output * cfg.data.normalize_std["PM2.5"] + cfg.data.normalize_mean["PM2.5"]
-            #                 mae = (output - batch["gt_target"]).abs().mean().item()
+                            output = output * cfg.data.normalize_std["PM2.5"] + cfg.data.normalize_mean["PM2.5"]
+                            mae = (output - batch["gt_target"]).abs().mean().item()
 
-            #                 rmetr.append(mae)
-            #         metrics.append(sum(rmetr) / len(rmetr))
-            #         rmetr.clear()
+                            rmetr.append(mae)
+                    metrics.append(sum(rmetr) / len(rmetr))
+                    rmetr.clear()
 
-            #     self.train()
+                self.train()
 
         return loss_log, metrics
 
 if __name__ == "__main__":
     # %%
     torch.manual_seed(3107)
-    torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
     model = SpatialModel()
 
     # %%
-    loss_log, metric_log = model.fit(dtm.train_dataloader(), dtm.val_dataloader(), n_epochs=10)
+    loss_log, metric_log = model.fit(dtm.train_dataloader(), dtm.val_dataloader(), n_epochs=6)
 
     print(model.linear.data)
 

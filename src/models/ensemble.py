@@ -25,3 +25,11 @@ class EnsembleModule:
         avg_out = avg_out / len(self.models)
 
         return avg_out
+
+    def to(self, device):
+        for model in self.models:
+            model.to(device)
+        
+        self.device = device
+
+        return self
