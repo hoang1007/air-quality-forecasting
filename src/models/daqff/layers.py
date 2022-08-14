@@ -19,21 +19,21 @@ class Conv1dExtractor(nn.Module):
             in_channels=n_features,
             out_channels=config["channels1"],
             kernel_size=config["kernel_size1"],
-            padding=2
+            padding="same"
         )
 
         self.conv2 = nn.Conv1d(
             in_channels=config["channels1"],
             out_channels=config["channels2"],
             kernel_size=config["kernel_size2"],
-            padding=1
+            padding="same"
         )
 
         self.conv3 = nn.Conv1d(
             in_channels=config["channels2"],
             out_channels=config["channels3"],
             kernel_size=config["kernel_size3"],
-            padding=0
+            padding="same"
         )
 
         self.bn1 = nn.BatchNorm1d(config["channels1"])
