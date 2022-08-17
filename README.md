@@ -7,6 +7,11 @@
     - Model daqff có số lượng tham số nhỏ hơn daqff-large (model được sử dụng để submit)
     - Sau khi chạy xong test có thể tải folder `submit` trong volume
 
+## Build docker image
+```bash
+docker build -t airqualityforecasting .
+```
+
 ## Khởi tạo volume
     docker volume create hblh
 
