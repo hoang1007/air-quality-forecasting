@@ -1,0 +1,42 @@
+training:
+  batch_size: 8
+  epochs: 10
+
+  n_features: 7
+  input_embedding_dim: 32
+  loc_embedding_dim: 32
+  time_embedding_dim: 8
+  num_gnn_layers: 2
+  num_attn_heads: 1
+  attn_feedforward_dim: 32
+  edge_dim: 16
+  gnn_dim: 10
+  num_groups: 4
+  inseq_len: 168
+  dropout: 0.2
+
+  optim:
+    lr: 0.005
+    optimizer: "adam"
+    sgd:
+      momentum: 0.9
+      weight_decay: 0.7
+    adam:
+      weight_decay: 0.1
+    scheduler: "plateau"
+    steplr:
+      step_size: 20
+    plateau:
+      patience: 4
+      eps: 0.0000001 # 1e-7
+      monitor: "mae"
+
+data:
+  normalize_mean:
+    temperature: 8.8
+    humidity: 9.05
+    PM2.5: 0.55
+  normalize_std:
+    temperature: 37.11
+    humidity: 90.95
+    PM2.5: 269.45
