@@ -6,16 +6,19 @@
     - Chỉnh sửa các config của model ở trong folder config/model
     - Model daqff có số lượng tham số nhỏ hơn daqff-large (model được sử dụng để submit)
 
+## Khởi tạo volume
+    docker volume create hblh
+
 ## Train
 
 > Chạy full config
 ```bash
-docker run --rm airqualityforecasting ++mode=train ++device=cpu model=daqff-large
+docker run -v hblh:/app --rm airqualityforecasting ++mode=train ++device=cpu model=daqff-large
 ```
 
 > Chạy với config có sẵn trong config.yaml
 ```
-docker run --rm airqualityforecasting
+docker run -v hblh:/app --rm airqualityforecasting
 ```
 > Chỉnh sửa config trong config.yaml
 
@@ -23,7 +26,7 @@ docker run --rm airqualityforecasting
 ## Test
 > Command line
 ```bash
-docker run --rm airqualityforecasting ++mode=test
+docker run -v hblh:/app --rm airqualityforecasting ++mode=test
 ```
 
 > Chỉnh sửa config:
