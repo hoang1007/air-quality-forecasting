@@ -72,7 +72,7 @@ class SpatialCorrelation(nn.Module):
 
         print("Finding spatial correlation")
         for epoch in range(1, n_epochs + 1):
-            with tqdm(train_dataloader, disable=self.progress) as train_bar:
+            with tqdm(train_dataloader, disable=(not self.progress)) as train_bar:
                 train_bar.set_description(f"Epoch {epoch}")
                 rloss = []
                 for batch_idx, batch in enumerate(train_bar):
@@ -97,7 +97,7 @@ class SpatialCorrelation(nn.Module):
 
                 scheduler.step()
 
-                with tqdm(val_dataloader, leave=False, disable=self.progress) as val_bar:
+                with tqdm(val_dataloader, leave=False, disable=(not self.progress)) as val_bar:
                     reval = []
                     self.eval()
                     with torch.no_grad():
