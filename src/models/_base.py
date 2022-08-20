@@ -11,6 +11,7 @@ class BaseAQFModel(LightningModule):
         self.target_normalize_mean = target_normalize_mean
         self.target_normalize_std = target_normalize_std
         self.optim_config = config["optim"]
+        self.metric_fns = MultiMetrics()
         self.save_hyperparameters()
 
     def compute_loss(self, input: torch.Tensor, target: torch.Tensor):

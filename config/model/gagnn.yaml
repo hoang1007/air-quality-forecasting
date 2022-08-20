@@ -3,29 +3,31 @@ training:
   epochs: 10
 
   n_features: 7
-  input_embedding_dim: 32
-  loc_embedding_dim: 32
+  input_embedding_dim: 64
+  loc_embedding_dim: 12
   time_embedding_dim: 8
-  num_gnn_layers: 2
+  num_enc_gnn_layers: 2
+  num_dec_gnn_layers: 2
   num_attn_heads: 1
-  attn_feedforward_dim: 32
-  edge_dim: 16
-  gnn_dim: 10
-  num_groups: 4
+  attn_feedforward_dim: 64
+  edge_dim: 12
+  gnn_dim: 32
+  num_groups: 6
   inseq_len: 168
+  outseq_len: 24
   dropout: 0.2
 
   optim:
-    lr: 0.005
+    lr: 0.0005
     optimizer: "adam"
     sgd:
       momentum: 0.9
       weight_decay: 0.7
     adam:
       weight_decay: 0.1
-    scheduler: "plateau"
+    scheduler: "steplr"
     steplr:
-      step_size: 20
+      step_size: 10
     plateau:
       patience: 4
       eps: 0.0000001 # 1e-7

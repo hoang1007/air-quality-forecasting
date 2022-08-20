@@ -17,44 +17,47 @@ class MultiMetrics:
         self._flattened = flattened
 
     def __call__(self, y_pred: torch.Tensor, y_true: torch.Tensor,):
-        if self._flattened:
-            assert len(y_pred.shape)
-
         return {
-            "mdape": mdape(y_pred, y_true),
-            "mae": mae(y_pred, y_true),
-            "mape": mape(y_pred, y_true),
-            "rmse": rmse(y_pred, y_true),
-            "r2": r2(y_pred, y_true),
+            "mdape": mdape(y_pred, y_true).item(),
+            "mae": mae(y_pred, y_true).item(),
+            "mape": mape(y_pred, y_true).item(),
+            "rmse": rmse(y_pred, y_true).item(),
+            "r2": r2(y_pred, y_true).item(),
         }
 
 
 def r2(y_pred: torch.Tensor, y: torch.Tensor):
-    nom = (y - y_pred).pow(2).sum().item()
-    denom = (y - y.mean()).pow(2).sum().item()
+    y_avg = y.sum(-1, keepdim=True) / y.size(-1)
 
-    return nom / denom
+    nom = (y - y_pred).pow(2).sum(-1)
+    denom = (y - y_avg).pow(2).sum(-1)
+
+    loss = 1 - nom / denom
+
+    return loss.mean()
 
 def mdape(y_pred: torch.Tensor, y: torch.Tensor):
-    return ((y - y_pred) / y).abs().median()
+    loss = ((y - y_pred) / y).abs().median(dim=-1).values
+
+    return loss.mean()
 
 def mape(y_pred: torch.Tensor, y: torch.Tensor):
-    v = ((y_pred - y) / y).abs()
+    loss = ((y_pred - y) / y).abs()
 
-    v = v.sum() / v.size(0)
+    loss = loss.sum(-1) / loss.size(-1)
 
-    return v.item()
+    return loss.mean()
 
 def mae(y_pred: torch.Tensor, y: torch.Tensor):
-    err = (y_pred - y).abs()
+    loss = (y_pred - y).abs()
 
-    err = err.sum() / err.size(0)
+    loss = loss.sum(-1) / loss.size(-1)
 
-    return err.item()
-
+    return loss.mean()
+    
 def rmse(y_pred: torch.Tensor, y: torch.Tensor):
     err = (y_pred - y).pow(2)
-    err = err.sum() / err.size(0)
+    err = err.sum(-1) / err.size(-1)
     err = err.sqrt()
 
-    return err.item()
+    return err.mean()
