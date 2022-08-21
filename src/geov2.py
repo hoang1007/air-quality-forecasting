@@ -37,7 +37,7 @@ def train(n_epochs: int, batch_size: int):
     )
 
     ckpt = ModelCheckpoint(CKPT_DIR, filename="gagnn")
-    logger = TensorBoardLogger(LOGDIR, name="gagnn", version="normal-init", default_hp_metric=False)
+    logger = TensorBoardLogger(LOGDIR, name="gagnn", version="format", default_hp_metric=False)
     trainer = pl.Trainer(
         logger=logger,
         max_epochs=n_epochs,
@@ -100,5 +100,5 @@ def test():
 	# print(dts[0]["gt_target"])
 
 if __name__ == "__main__":
-    # train(30, 16)
-    test()
+    train(30, 16)
+    # test()
