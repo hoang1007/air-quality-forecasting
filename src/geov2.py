@@ -37,7 +37,7 @@ def train(n_epochs: int, batch_size: int):
     )
 
     ckpt = ModelCheckpoint(CKPT_DIR, filename="gagnn")
-    logger = TensorBoardLogger(LOGDIR, name="gagnn", version="group=6", default_hp_metric=False)
+    logger = TensorBoardLogger(LOGDIR, name="gagnn", version="normal-init", default_hp_metric=False)
     trainer = pl.Trainer(
         logger=logger,
         max_epochs=n_epochs,
@@ -60,11 +60,14 @@ def test():
     )
 
     model.load_from_checkpoint(
-        "/home/hoang/Documents/CodeSpace/air-quality-forecasting/ckpt/gagnn-group=4.ckpt")
+        "/home/hoang/Documents/CodeSpace/air-quality-forecasting/ckpt/gagnn-v1.ckpt")
 
     dt = dts[0]
 
-    station_groups = torch.softmax(model.w, dim=-1).max(-1).indices.cpu().tolist()
+    probs = torch.softmax(model.w, dim=-1)
+    print(probs)
+    station_groups = probs.max(-1).indices.cpu().tolist()
+    print(station_groups)
 
     src_stations = [
         "Tran Quoc Toan",
@@ -89,10 +92,10 @@ def test():
     plt.show()
 
 
-    # out = model.predict(dts[0])
+    out = model.predict(dts[0])
 
-    # print(dts[0]["src_nexts"])
-    # print(out)
+    print(dts[0]["src_nexts"])
+    print(out)
 
 	# print(dts[0]["gt_target"])
 

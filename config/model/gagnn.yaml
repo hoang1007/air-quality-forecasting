@@ -2,7 +2,7 @@ training:
   batch_size: 8
   epochs: 10
 
-  n_features: 7
+  n_features: 3
   input_embedding_dim: 64
   loc_embedding_dim: 12
   time_embedding_dim: 8
@@ -12,7 +12,7 @@ training:
   attn_feedforward_dim: 64
   edge_dim: 12
   gnn_dim: 32
-  num_groups: 6
+  num_groups: 3
   inseq_len: 168
   outseq_len: 24
   dropout: 0.2
@@ -34,11 +34,20 @@ training:
       monitor: "mae"
 
 data:
+  # normalize_mean:
+  #   temperature: 8.8
+  #   humidity: 9.05
+  #   PM2.5: 0.55
+  # normalize_std:
+  #   temperature: 37.11
+  #   humidity: 90.95
+  #   PM2.5: 269.45
+
   normalize_mean:
-    temperature: 8.8
-    humidity: 9.05
-    PM2.5: 0.55
+    temperature: 26.55
+    humidity: 75.77
+    PM2.5: 45.06
   normalize_std:
-    temperature: 37.11
-    humidity: 90.95
-    PM2.5: 269.45
+    temperature: 5.94
+    humidity: 15.43
+    PM2.5: 42.23

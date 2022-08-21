@@ -16,7 +16,7 @@ class GAGNNModel(BaseAQFModel):
         """
         super().__init__(config, target_normalize_mean, target_normalize_std)
 
-        self.n_features = config["n_features"]
+        self.n_features = config["n_features"] + 4 * config["time_embedding_dim"]
         self.input_embedding_dim = config["input_embedding_dim"]
         self.loc_embedding_dim = config["loc_embedding_dim"]
         self.time_embedding_dim = config["time_embedding_dim"]
@@ -33,26 +33,27 @@ class GAGNNModel(BaseAQFModel):
 
         self.enc_layer = nn.TransformerEncoderLayer(
             self.n_features,
-            nhead=self.num_attn_heads,
+            nhead=5,
             dim_feedforward=self.attn_ff_dim,
             dropout=self.dropout,
             batch_first=True
         )
+        # self.enc_layer = nn.LSTM(
+        #     input_size=self.n_features,
+        #     hidden_size=self.input_embedding_dim,
+        #     num_layers=1,
+        #     batch_first=True,
+        #     dropout=self.dropout
+        # )
 
         self.input_embedding = nn.Linear(self.inseq_len * self.n_features, self.input_embedding_dim)
         self.loc_embedding = nn.Linear(2, self.loc_embedding_dim)
-        # self.hour_embedding = nn.Embedding(24, self.time_embedding_dim)
-        # self.solar_term_embedding = nn.Embedding(24, self.time_embedding_dim)
-        # self.day_embedding = nn.Embedding(31, self.time_embedding_dim)
-        # self.month_embedding = nn.Embedding(12, self.time_embedding_dim)
+        self.hour_embedding = nn.Embedding(24, self.time_embedding_dim)
+        self.solar_term_embedding = nn.Embedding(24, self.time_embedding_dim)
+        self.day_embedding = nn.Embedding(31, self.time_embedding_dim)
+        self.month_embedding = nn.Embedding(12, self.time_embedding_dim)
 
-        # self.group_mapping = nn.Sequential(
-        #     nn.Linear(2, self.num_groups),
-        #     nn.Sigmoid(),
-        #     nn.Linear(self.num_groups, self.num_groups)
-        # )
-        # self.group_mapping = nn.Linear(2, self.num_groups, bias=False)
-        self.w = nn.parameter.Parameter(torch.rand((11, self.num_groups), device=self.device), requires_grad=True)
+        self.w = nn.parameter.Parameter(torch.randn((11, self.num_groups), device=self.device), requires_grad=True)
 
         self.edge_inf = nn.Sequential(
             nn.Linear(self.input_embedding_dim * 2 + self.loc_embedding_dim * 2, self.edge_dim),
@@ -91,10 +92,21 @@ class GAGNNModel(BaseAQFModel):
         batch_size = x.size(0)
         n_stations = x.size(1)
 
+        # time.shape == (batch_size, n_stations, seq_len, n_timefeats)
+        time = time.reshape(batch_size * n_stations, -1, time.size(-1))
+        hour_embed = self.hour_embedding(time[..., 0]).view(batch_size, n_stations, -1, self.time_embedding_dim)
+        day_embed = self.day_embedding(time[..., 1] - 1).view(batch_size, n_stations, -1, self.time_embedding_dim)
+        month_embed = self.month_embedding(time[..., 2] - 1).view(batch_size, n_stations, -1, self.time_embedding_dim)
+        solar_term_embed = self.solar_term_embedding(time[..., 3]).view(batch_size, n_stations, -1, self.time_embedding_dim)
+
+        x = torch.cat((x, hour_embed, day_embed, month_embed, solar_term_embed), dim=-1).float()
+
         x = x.reshape(-1, x.size(-2), x.size(-1))
         x = self.enc_layer(x)
         x = x.reshape(-1, n_stations, x.size(-2) * x.size(-1))
         x = self.input_embedding(x)
+        # x, _ = self.enc_layer(x)
+        # x = x[:, -1].contiguous().view(batch_size, n_stations, -1)
 
         w = F.softmax(self.w, dim=-1)
         w1 = w.transpose(0, 1).unsqueeze(0)
@@ -106,9 +118,6 @@ class GAGNNModel(BaseAQFModel):
         in_locs = torch.cat((x, loc_embed), dim=-1)
         # group_feats.shape == (batch_size, n_groups, feat_size)
         group_feats = torch.bmm(w1, in_locs)
-
-        # group gnn
-        # hour_embed = self.hour_embedding(time[:, 0])
 
         gr_edge_weights = []
         gr_edge_ids = []
@@ -122,7 +131,7 @@ class GAGNNModel(BaseAQFModel):
                 gr_edge_idx = x.new_tensor([i, j], dtype=torch.long)
 
                 gr_edge_weights.append(gr_edge_attr)
-                gr_edge_ids.append(gr_edge_idx)        
+                gr_edge_ids.append(gr_edge_idx)    
 
         # gr_edge_weights.shape == (batch_size, n_gr * (n_gr - 1), edge_dim)
         gr_edge_weights = torch.stack(gr_edge_weights, dim=1)
@@ -150,7 +159,7 @@ class GAGNNModel(BaseAQFModel):
         
         # dec_weights = self.group_mapping(tar_locs)
         dec_weights = None
-        # dec_outs.shape == (batch_size, 1, gnn_dim)
+        # dec_outs.shape == (batch_size, n_stations, gnn_dim)
         dec_outs = self.decoder(
             new_x,
             n_stations,
@@ -165,7 +174,7 @@ class GAGNNModel(BaseAQFModel):
 
         preds = self.predictor(dec_outs).view(batch_size, -1, self.outseq_len)
 
-        return preds
+        return preds * self.target_normalize_std + self.target_normalize_mean
 
     def _get_edge_attrs(self, locs: torch.Tensor):
         """
@@ -210,10 +219,10 @@ class GAGNNModel(BaseAQFModel):
 
     def training_step(self, batch, batch_idx):
         # outs = self(batch["features"], batch["src_locs"], batch["tar_locs"], None)
-        outs = self(batch["features"], batch["src_locs"], None, None)
+        outs = self(batch["features"], batch["src_locs"], None, batch["time"])
 
         # loss = self.compute_loss(outs, batch["target"])
-        loss = self.compute_loss(outs, batch["src_nexts"])
+        loss = self.compute_loss(outs, batch["src_nexts"], reduction="mean")
 
         self.log("loss", loss.item())
 
@@ -222,9 +231,7 @@ class GAGNNModel(BaseAQFModel):
     def validation_step(self, batch, batch_idx):
         # pres.shape == (batch_size, n_src_stations, output_size)
         # outs = self(batch["features"], batch["src_locs"], batch["tar_locs"], None)
-        outs = self(batch["features"], batch["src_locs"], None, None)
-
-        outs = outs * self.target_normalize_std + self.target_normalize_mean
+        outs = self(batch["features"], batch["src_locs"], None, batch["time"])
 
         # mae = self.compute_loss(outs, batch["gt_target"])
         mae = self.compute_loss(outs, batch["src_nexts"], reduction="sum")
@@ -240,9 +247,10 @@ class GAGNNModel(BaseAQFModel):
             features = dt["features"].unsqueeze(0).to(self.device)
             src_locs = dt["src_locs"].unsqueeze(0).to(self.device)
             # tar_loc = dt["tar_locs"].unsqueeze(0).to(self.device)
+            time = dt["time"].unsqueeze(0).to(self.device)
 
             # output = self(features, src_locs, tar_loc, None).squeeze(0)
-            output = self(features, src_locs, None, None).squeeze(0)
+            output = self(features, src_locs, None, time).squeeze(0)
             # inverse transforms
             # output = output * self.target_normalize_std + self.target_normalize_mean
 

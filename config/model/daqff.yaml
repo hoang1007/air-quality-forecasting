@@ -3,7 +3,7 @@ training:
   epochs: 20
   
   n_stations: 11
-  n_features: 7
+  n_features: 3
   seq_len: 168
 
   dropout: 0.3

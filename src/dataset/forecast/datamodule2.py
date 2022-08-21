@@ -1,7 +1,9 @@
 from typing import Callable, Dict, List, Tuple, Optional
 import os
+import warnings
 from datetime import datetime
 import pandas as pd
+import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from pytorch_lightning import LightningDataModule
@@ -17,8 +19,8 @@ class AirQualityDataset2(Dataset):
     def __init__(
         self,
         rootdir: str,
-        normalize_mean: Dict[str, float],
-        normalize_std: Dict[str, float],
+        normalize_mean: Dict[str, float] = None,
+        normalize_std: Dict[str, float] = None,
         droprate: float = 0.5,
         fillnan_fn: Callable = None,
         fill_na: bool = True,
@@ -27,13 +29,14 @@ class AirQualityDataset2(Dataset):
     ):
         self.inframe_size = 24 * 7
         self.outframe_size = 24
-        self.feature_cols = ["humidity", "temperature", "PM2.5", "hour", "day", "month", "solar_term"]
-        self.mean_ = normalize_mean
-        self.std_ = normalize_std
+        self.feature_cols = ["humidity", "temperature", "PM2.5"]
+        self.time_cols = ["hour", "day", "month", "solar_term"]
         self.droprate = droprate
         self.data_set = data_set
         self.cachepath = cachepath
         self.fill_na = fill_na
+        self.mean_, self.std_ = self._format_normalize(
+            dict(normalize_mean), dict(normalize_std))
 
         if fillnan_fn is None and self.fill_na:
             fillnan_fn = default_fillna_fn
@@ -82,29 +85,33 @@ class AirQualityDataset2(Dataset):
 
         if index >= len(self):
             raise IndexError
-        
-        X_feats = normalize_datatensor(self.data["X_feats"][index], self.feature_cols, self.mean_, self.std_)
+
+        X_feats = normalize_datatensor(
+            self.data["X_feats"][index], self.feature_cols, self.mean_, self.std_)
         X_feats = X_feats.nan_to_num_(nan=0)
 
-        X_nexts = normalize_datatensor(self.data["X_nexts"][index].unsqueeze(-1), ["PM2.5"], self.mean_, self.std_).squeeze(-1)
-        X_nexts = X_nexts.nan_to_num_(nan=0)
+        # X_nexts = normalize_datatensor(self.data["X_nexts"][index].unsqueeze(-1), ["PM2.5"], self.mean_, self.std_).squeeze(-1)
+        # X_nexts = X_nexts.nan_to_num_(nan=0)
+        X_nexts = self.data["X_nexts"][index]
 
         return {
             "features": X_feats,
             "src_locs": self.data["X_locs"],
             "src_nexts": X_nexts,
             "src_masks": self.data["X_masks"][index],
+            "time": self.data["X_time"][index]
         }
 
     def _get_testing_item(self, index):
         # input: list of Dict
-            # X_feats: Tensor (n_stations, n_timesteps, n_features)
-            # X_locs: Tensor (n_stations, 2)
-            # X_masks: Tensor (n_stations, n_frames)
+        # X_feats: Tensor (n_stations, n_timesteps, n_features)
+        # X_locs: Tensor (n_stations, 2)
+        # X_masks: Tensor (n_stations, n_frames)
         # y_locs: Tensor (n_target_stations, 2)
 
         dt = self.data["input"][index]
-        X_feats = normalize_datatensor(dt["X_feats"], self.feature_cols, self.mean_, self.std_)
+        X_feats = normalize_datatensor(
+            dt["X_feats"], self.feature_cols, self.mean_, self.std_)
         X_feats = X_feats.nan_to_num_(nan=0)
 
         return {
@@ -112,9 +119,9 @@ class AirQualityDataset2(Dataset):
             "src_locs": dt["X_locs"],
             "tar_locs": self.data["y_locs"],
             "src_masks": dt["X_masks"].squeeze(-1),
+            "time": dt["X_time"],
             "folder_idx": self.data["folder_idx"][index],
         }
-
 
     def preprocess_training_data(self, train_root: str, fillnan_fn: Callable = None):
         raw_data = air_quality_train_data(train_root)
@@ -124,28 +131,33 @@ class AirQualityDataset2(Dataset):
         X_feats = torch.tensor([])
         X_locs = torch.tensor([])
         X_masks = torch.tensor([], dtype=torch.bool)
+        X_time = torch.tensor([], dtype=torch.long)
 
         for stname, station in raw_data["input"].items():
             mask_ = None
 
             for col in ("humidity", "temperature", "PM2.5"):
-                col_mask = self._create_mask(station["data"][col], self.inframe_size, self.outframe_size)
+                col_mask = self._create_mask(
+                    station["data"][col], self.inframe_size, self.outframe_size)
 
-                mask_ = col_mask if mask_ is None else torch.minimum(mask_, col_mask)
+                mask_ = col_mask if mask_ is None else torch.minimum(
+                    mask_, col_mask)
 
             # mask_.shape == (n_frame,)
             # feat.shape == (9000, 3)
             # loc.shape == (2)
-            feat, loc = self._preprocess_station_data(
+            feat, loc, time = self._preprocess_station_data(
                 station["data"], station["location"], fillnan_fn)
 
             X_feats = torch.cat((X_feats, feat.unsqueeze(0)), dim=0)
             X_locs = torch.cat((X_locs, loc.unsqueeze(0)), dim=0)
             X_masks = torch.cat((X_masks, mask_.unsqueeze(0)), dim=0)
+            X_time = torch.cat((X_time, time.unsqueeze(0)), dim=0)
 
         # convert X_feats, y from n_timesteps to n_frames
         __X_feats = []
         __X_nexts = []
+        __X_time = []
 
         i = 0
         while True:
@@ -155,8 +167,10 @@ class AirQualityDataset2(Dataset):
 
             if next_end_idx > X_feats.size(1):
                 break
-            __X_feats.append(X_feats[:, start_idx : end_idx].clone())
-            __X_nexts.append(X_feats[:, end_idx : next_end_idx, pm25_idx].clone())
+            __X_feats.append(X_feats[:, start_idx: end_idx].clone())
+            __X_nexts.append(
+                X_feats[:, end_idx: next_end_idx, pm25_idx].clone())
+            __X_time.append(X_time[:, start_idx : end_idx].clone())
 
             i += 1
 
@@ -170,7 +184,8 @@ class AirQualityDataset2(Dataset):
             "X_feats": __X_feats,
             "X_locs": X_locs,
             "X_masks": X_masks.t(),
-            "X_nexts": __X_nexts
+            "X_nexts": __X_nexts,
+            "X_time": __X_time
         }, len(__X_feats)
 
     def preprocess_testing_data(self, test_root: str, train_root: str, fillnan_fn: Callable = None):
@@ -181,25 +196,30 @@ class AirQualityDataset2(Dataset):
             X_feats = torch.tensor([])
             X_locs = torch.tensor([])
             X_masks = torch.tensor([], dtype=torch.bool)
+            X_time = torch.tensor([], dtype=torch.long)
 
             for stname, station in elm.items():
                 mask_ = None
                 for col in ("humidity", "temperature", "PM2.5"):
-                    col_mask = self._create_mask(station["data"][col], self.inframe_size, self.outframe_size)
+                    col_mask = self._create_mask(
+                        station["data"][col], self.inframe_size, self.outframe_size)
 
-                    mask_ = col_mask if mask_ is None else torch.minimum(mask_, col_mask)
+                    mask_ = col_mask if mask_ is None else torch.minimum(
+                        mask_, col_mask)
 
-                feat, loc = self._preprocess_station_data(
+                feat, loc, time = self._preprocess_station_data(
                     station["data"], station["location"], fillnan_fn)
 
                 X_feats = torch.cat((X_feats, feat.unsqueeze(0)), dim=0)
                 X_locs = torch.cat((X_locs, loc.unsqueeze(0)), dim=0)
                 X_masks = torch.cat((X_masks, mask_.unsqueeze(0)), dim=0)
+                X_time = torch.cat((X_time, time.unsqueeze(0)), dim=0)
 
             X_items.append({
                 "X_feats": X_feats,
                 "X_locs": X_locs,
                 "X_masks": X_masks,
+                "X_time": X_time,
             })
 
         y_locs = torch.tensor([])
@@ -216,22 +236,52 @@ class AirQualityDataset2(Dataset):
             "folder_idx": raw_data["folder_idx"]
         }, data_length
 
-
     def _preprocess_station_data(self, df: pd.DataFrame, location: Tuple[float, float], fillnan_fn: Callable = None):
-        hours = df["timestamp"].apply(lambda x: datetime.strptime(x, "%d/%m/%Y %H:%M").hour)
-        df["hour"] = hours / 24
-        df["day"] = df["timestamp"].apply(lambda x: datetime.strptime(x, "%d/%m/%Y %H:%M").day / 31)
-        df["month"] = df["timestamp"].apply(lambda x: datetime.strptime(x, "%d/%m/%Y %H:%M").month / 12)
-        df["solar_term"] = df["timestamp"].apply(lambda x: get_solar_term(datetime.strptime(x, "%d/%m/%Y %H:%M")) / 24)
+        time_ = {"hour": [], "day": [], "month": [], "solar_term": []}
+
+        for t in df.timestamp:
+            date = datetime.strptime(t, "%d/%m/%Y %H:%M")
+
+            time_["hour"].append(date.hour)
+            time_["day"].append(date.day)
+            time_["month"].append(date.month)
+            time_["solar_term"].append(get_solar_term(date))
+
+        time = torch.tensor([], dtype=torch.long)
+        for t in self.time_cols:
+            time = torch.cat((time, torch.tensor(time_[t]).unsqueeze(-1)), dim=-1)
 
         if fillnan_fn is not None:
             for col in self.feature_cols:
-                    df[col] = fillnan_fn(df[col])
+                df[col] = fillnan_fn(df[col])
 
         features = dataframe_to_tensor(df, usecols=self.feature_cols)
         loc = torch.tensor(location)
 
-        return features, loc
+        return features, loc, time
+
+    def _format_normalize(self, mean_: Dict[str, float] = None, std_: Dict[str, float] = None):
+        _autofill_cols = []
+
+        if mean_ is None:
+            mean_ = {feat: 0 for feat in self.feature_cols}
+        else:
+            for feat in self.feature_cols:
+                if feat not in mean_:
+                    mean_.update({feat: 0})
+                    _autofill_cols.append(feat)
+
+        if std_ is None:
+            std_ = {feat: 1 for feat in self.feature_cols}
+        else:
+            for feat in self.feature_cols:
+                if feat not in std_:
+                    std_.update({feat: 1})
+
+        if len(_autofill_cols):
+            warnings.warn(f"{_autofill_cols} have filled with mean = 0 and std = 1")
+
+        return mean_, std_
 
     def _create_mask(self, x: pd.Series, frame_size: int, stride: int):
         """
@@ -253,7 +303,7 @@ class AirQualityDataset2(Dataset):
             if end_idx > len(x):
                 break
 
-            nan_rate = x[start_idx : end_idx].isna().sum() / frame_size
+            nan_rate = x[start_idx: end_idx].isna().sum() / frame_size
             if nan_rate > self.droprate:
                 mask.append(False)
             else:
@@ -266,15 +316,15 @@ class AirQualityDataset2(Dataset):
 
 class AirQualityDataModule2(LightningDataModule):
     def __init__(self,
-        rootdir: str,
-        normalize_mean: Dict[str, float],
-        normalize_std: Dict[str, float],
-        droprate: float,
-        fillnan_fn: Callable = None,
-        fill_na: bool = True,
-        train_ratio: float = 0.75,
-        batch_size: int = 32,
-    ):
+                 rootdir: str,
+                 normalize_mean: Dict[str, float],
+                 normalize_std: Dict[str, float],
+                 droprate: float,
+                 fillnan_fn: Callable = None,
+                 fill_na: bool = True,
+                 train_ratio: float = 0.75,
+                 batch_size: int = 32,
+                 ):
         super().__init__()
 
         self.batch_size = batch_size
@@ -300,7 +350,8 @@ class AirQualityDataModule2(LightningDataModule):
         train_size = int(len(datafull) * self.train_ratio)
         val_size = len(datafull) - train_size
 
-        self.data_train, self.data_val = random_split(datafull, [train_size, val_size])
+        self.data_train, self.data_val = random_split(
+            datafull, [train_size, val_size])
 
     def train_dataloader(self):
         return DataLoader(self.data_train, batch_size=self.batch_size, num_workers=1)
@@ -308,12 +359,13 @@ class AirQualityDataModule2(LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.data_val, batch_size=self.batch_size, num_workers=1)
 
+
 def normalize_datatensor(
     data: torch.Tensor,
     col_order: List[str],
     mean_: Dict[str, float],
     std_: Dict[str, float]
-    ):
+):
     """
     Normalize the data with `mean_` and `std_`
 
@@ -328,10 +380,10 @@ def normalize_datatensor(
     for i in range(data.size(-1)):
         feat = col_order[i]
 
-        if feat in mean_:
-            data[..., i] = (data[..., i] - mean_[feat]) / std_[feat]
-    
+        data[..., i] = (data[..., i] - mean_[feat]) / std_[feat]
+
     return data
+
 
 def dataframe_to_tensor(df: pd.DataFrame, usecols: List[str]):
     """
@@ -341,10 +393,14 @@ def dataframe_to_tensor(df: pd.DataFrame, usecols: List[str]):
         df: pandas.DataFrame
         usecols: List of column names to convert
     """
+
     features = torch.tensor([])
     for col in usecols:
+        col_data = df[col].to_numpy()
+        col_data = torch.from_numpy(col_data)
+
         features = torch.cat(
-            (features, torch.tensor(df[col], dtype=torch.float).unsqueeze(-1)), 
-        dim=-1)
+            (features, col_data.unsqueeze(-1)),
+            dim=-1)
 
     return features

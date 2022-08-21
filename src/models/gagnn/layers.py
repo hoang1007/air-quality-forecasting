@@ -76,7 +76,9 @@ class DecoderModule(nn.Module):
         x = self.input_embedding(x)
         x = x.view(-1, src_len, x.size(-1))
         
-        enc_weights = nn.parameter.Parameter(enc_weights, requires_grad=False)
+        enc_weights = enc_weights.detach()
+        enc_weights = torch.softmax(enc_weights, dim=-1)
+
         enc_w1 = enc_weights.transpose(0, 1).unsqueeze(0).repeat_interleave(x.size(0), 0)
 
         gr_feats = torch.bmm(enc_w1, x)

@@ -18,8 +18,17 @@ class DAQFFModel(BaseAQFModel):
         super().__init__(config, target_normalize_mean, target_normalize_std)
 
         self.ff_size = config["ff_size"]
+        self.time_embedding_dim = 16
+        self.loc_embedding_dim = 12
+        self.n_features = config["n_features"] + 4 * self.time_embedding_dim + self.loc_embedding_dim
 
-        self.extractor = Conv1dExtractor(config, config["n_features"])
+        self.loc_embedding = nn.Linear(2, self.loc_embedding_dim)
+        self.hour_embedding = nn.Embedding(24, self.time_embedding_dim)
+        self.solar_term_embedding = nn.Embedding(24, self.time_embedding_dim)
+        self.day_embedding = nn.Embedding(31, self.time_embedding_dim)
+        self.month_embedding = nn.Embedding(12, self.time_embedding_dim)
+
+        self.extractor = Conv1dExtractor(config, self.n_features)
         self.st_layer = SpatialTemporalLayer(config, self.ff_size)
 
         self.linear1 = nn.Linear(config["lstm_output_size"], config["n_stations"])
@@ -37,13 +46,30 @@ class DAQFFModel(BaseAQFModel):
         self,
         x: torch.Tensor,
         src_locs: torch.Tensor,
-        masks: torch.Tensor
-    ):
+        masks: torch.Tensor,
+        time: torch.Tensor,
+    ):  
+        batch_size, n_stations = x.size(0), x.size(1)
+        # time_mean_ = x.new_tensor([0, 1, 1, 0])
+        # time_std_ = x.new_tensor([24, 31, 12, 24])
+        # time = (time - time_mean_) / time_std_
 
+        # x = torch.cat((x, time), dim=-1).float()
+
+        time = time.reshape(batch_size * n_stations, -1, time.size(-1))
+        hour_embed = self.hour_embedding(time[..., 0]).view(batch_size, n_stations, -1, self.time_embedding_dim)
+        day_embed = self.day_embedding(time[..., 1] - 1).view(batch_size, n_stations, -1, self.time_embedding_dim)
+        month_embed = self.month_embedding(time[..., 2] - 1).view(batch_size, n_stations, -1, self.time_embedding_dim)
+        solar_term_embed = self.solar_term_embedding(time[..., 3]).view(batch_size, n_stations, -1, self.time_embedding_dim)
+
+        x = torch.cat((x, hour_embed, day_embed, month_embed, solar_term_embed), dim=-1).float()
+
+        src_locs = (src_locs - src_locs.mean(1, keepdim=True)) / src_locs.std(1, keepdim=True)
+        loc_embed = self.loc_embedding(src_locs).unsqueeze(2).repeat_interleave(x.size(2), 2)
+
+        x = torch.cat((x, loc_embed), dim=-1)
         # features.shape == (batch_size, extractor_size, n_stations)
         features = self.extractor(x)
-
-        batch_size = x.size(0)
         
         _feats = x.new_zeros(batch_size, features.size(1), self.ff_size)
         for i in range(batch_size):
@@ -51,32 +77,27 @@ class DAQFFModel(BaseAQFModel):
             _feats[i] = torch.matmul(features[i, :, masks_], self.linear3[masks_])
         features = _feats
 
-        # corr_weights.shape == (batch_size, n_stations, n_stations)
-        # corr_weigts = inverse_distance_weighted(locs, locs, beta=1.0)
-        # corr_weigts = torch.softmax(corr_weigts, dim=-1)
-        # features = torch.bmm(features, corr_weigts)
-
         features = self.st_layer(features)
 
         outs = self.linear1(features).unsqueeze(-1)
         # (batch_size, 11, 24)
         outs = self.linear2(outs)
 
-        return outs
+        return outs * self.target_normalize_std + self.target_normalize_mean
 
-    def compute_loss(self, input: torch.Tensor, target: torch.Tensor):
-        loss = F.mse_loss(input, target, reduction="none")
+    def compute_loss(self, input: torch.Tensor, target: torch.Tensor, reduction: str = "mean"):
+        loss = F.l1_loss(input, target, reduction=reduction)
 
-        loss = loss.mean(-1).sqrt()
+        # loss = loss.mean(-1).sqrt()
 
-        loss = loss.sum() / loss.size(0)
+        # loss = loss.sum() / loss.size(0)
 
         return loss
 
     def training_step(self, batch, batch_idx):
-        outs = self(batch["features"], batch["src_locs"], batch["src_masks"])
+        outs = self(batch["features"], batch["src_locs"], batch["src_masks"], batch["time"])
 
-        loss = self.compute_loss(outs, batch["src_nexts"])
+        loss = self.compute_loss(outs, batch["src_nexts"].float(), reduction="mean")
 
         self.log("loss", loss.item())
 
@@ -84,9 +105,8 @@ class DAQFFModel(BaseAQFModel):
 
     def validation_step(self, batch, batch_idx):
         # pres.shape == (batch_size, n_src_stations, output_size)
-        outs = self(batch["features"], batch["src_locs"], batch["src_masks"])
+        outs = self(batch["features"], batch["src_locs"], batch["src_masks"], batch["time"])
 
-        outs = outs * self.target_normalize_std + self.target_normalize_mean
         # src_outs = src_outs * self.target_normalize_std + self.target_normalize_mean
 
         # batch_size = src_outs.size(0)
@@ -101,7 +121,8 @@ class DAQFFModel(BaseAQFModel):
         #     preds[i] = (src_outs[i, masks] * weights).sum(0)
 
         # return self.metrics(tar_outs, batch["gt_target"])
-        mae = (outs - batch["src_nexts"]).abs().mean()
+        # mae = (outs - batch["src_nexts"].float()).abs().mean()
+        mae = self.compute_loss(outs, batch["src_nexts"].float(), reduction="sum")
 
         return {"mae": mae}
 
