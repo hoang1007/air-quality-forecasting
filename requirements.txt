@@ -1,5 +1,7 @@
 torch
 pytorch-lightning
+torch-scatter
+matplotlib
 numpy
 pandas
 hydra-core

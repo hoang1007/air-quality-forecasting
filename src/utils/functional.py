@@ -1,6 +1,6 @@
-from typing import Tuple
+from typing import List, Tuple
 import torch
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def scale_softmax(x: torch.Tensor, dim: int = 0):
@@ -124,3 +124,14 @@ def get_solar_term(date: datetime):
             return DAI_HAN
         else:
             raise ValueError
+
+def get_next_period(date: datetime, len: int) -> List[datetime]:
+    delta = timedelta(hours=1)
+
+    out = []
+    for i in range(len):
+        next = date + delta
+
+        out.append(next)
+
+    return out
