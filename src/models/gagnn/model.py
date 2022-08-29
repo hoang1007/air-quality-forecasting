@@ -158,8 +158,8 @@ class AQFBaseGAGNN(BaseAQFModel):
         for _ in range(self.num_gnn_layers - 1):
             self.group_gnn.append(GraphNode(self.gnn_dim, self.edge_dim, self.gnn_dim))
 
-        self.fc1 = nn.Linear(self.gnn_dim + self.input_embedding_dim, 32)
-        self.fc2 = nn.Linear(32 + self.loc_embedding_dim, 16)
+        self.fc1 = nn.Linear(self.gnn_dim + self.loc_embedding_dim, 32)
+        self.fc2 = nn.Linear(32 + self.input_embedding_dim, 16)
         self.fc3 = nn.Linear(16, self.outseq_len)
 
     def forward(
@@ -240,7 +240,7 @@ class AQFBaseGAGNN(BaseAQFModel):
             batch["metero"],
             batch["src_locs"],
             batch["time"],
-            batch["time_next"],
+            None,
             None
         )
 
@@ -255,14 +255,11 @@ class AQFBaseGAGNN(BaseAQFModel):
             batch["metero"],
             batch["src_locs"],
             batch["time"],
-            batch["time_next"],
-            batch["tar_locs"]
+            None,
+            None
         )
 
-        err = (outs - batch["src_nexts"]).abs().sum(-1)
-        err = err.mean()
-
-        return {"mae": err}
+        return self.metric_fns(outs, batch["src_nexts"])
 
     def predict(self, dt):
         st = self.training
@@ -275,10 +272,10 @@ class AQFBaseGAGNN(BaseAQFModel):
             for k in dt["time"]:
                 dt["time"][k] = dt["time"][k].to(self.device).unsqueeze(0)
 
-            for k in dt["time_next"]:
-                dt["time_next"][k] = dt["time_next"][k].to(self.device).unsqueeze(0)
+            # for k in dt["time_next"]:
+            #     dt["time_next"][k] = dt["time_next"][k].to(self.device).unsqueeze(0)
 
-            preds = self(metero, src_locs, dt["time"], dt["time_next"], None)
+            preds = self(metero, src_locs, dt["time"], None, None)
 
         self.train(st)
         return preds

@@ -16,7 +16,10 @@ class MultiMetrics:
     def __init__(self, flattened: bool = True):
         self._flattened = flattened
 
-    def __call__(self, y_pred: torch.Tensor, y_true: torch.Tensor,):
+    def __call__(self, y_pred: torch.Tensor, y_true: torch.Tensor):
+        y_pred = y_pred.reshape(y_pred.size(0), -1)
+        y_true = y_true.reshape_as(y_pred)
+        
         return {
             "mdape": mdape(y_pred, y_true).item(),
             "mae": mae(y_pred, y_true).item(),

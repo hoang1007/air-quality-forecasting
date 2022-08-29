@@ -56,7 +56,7 @@ def _read_stations(
         filepath = path.join(rootdir, station_name + ".csv")
         df = pd.read_csv(
             filepath,
-            usecols=["timestamp", "humidity", "temperature", "PM2.5"],
+            # usecols=["timestamp", "humidity", "temperature", "PM2.5"],
             index_col=False
         )
 

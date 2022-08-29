@@ -106,10 +106,10 @@ class DAQFFModel(BaseAQFModel):
         outs = self(batch["metero"], batch["src_locs"], batch["time"])
 
         # mae = self.compute_loss(outs, batch["src_nexts"].float(), reduction="sum")
-        mae = (outs - batch["src_nexts"]).abs().sum(-1)
-        mae = mae.mean()
+        # mae = (outs - batch["src_nexts"]).abs().sum(-1)
+        # mae = mae.mean()
 
-        return {"mae": mae}
+        return self.metric_fns(outs, batch["src_nexts"])
 
 
     def predict(self, dt):

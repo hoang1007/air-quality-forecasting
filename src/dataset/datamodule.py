@@ -54,7 +54,7 @@ class AirQualityDataset(Dataset):
         rootdir: str,
         normalize_mean: Dict[str, float],
         normalize_std: Dict[str, float],
-        data_set: str = "train"
+        data_set: str = "train",
     ):
         super().__init__()
 
@@ -104,7 +104,7 @@ class AirQualityDataset(Dataset):
         out_start_idx = in_end_idx
         out_end_idx = out_start_idx + self.outseq_len
 
-        for name, station in self.data["input"].items():
+        for station in self.data["input"].values():
             df = station["data"].iloc[in_start_idx : in_end_idx].copy()
             next_df = station["data"].iloc[out_start_idx : out_end_idx]
 
