@@ -1,3 +1,4 @@
+from typing import Dict
 from torch import nn
 import torch.nn.functional as F
 from .layers import *
@@ -28,8 +29,10 @@ class DAQFFModel(BaseAQFModel):
         self.day_embedding = nn.Embedding(31, self.time_embedding_dim)
         self.month_embedding = nn.Embedding(12, self.time_embedding_dim)
 
+        self.loc_norm = nn.BatchNorm1d(self.loc_embedding_dim)
+
         self.extractor = Conv1dExtractor(config, self.n_features)
-        self.st_layer = SpatialTemporalLayer(config, self.ff_size)
+        self.st_layer = SpatialTemporalLayer(config, config["n_stations"])
 
         self.linear1 = nn.Linear(config["lstm_output_size"], config["n_stations"])
         self.linear2 = nn.Linear(1, config["output_size"])
@@ -46,36 +49,24 @@ class DAQFFModel(BaseAQFModel):
         self,
         x: torch.Tensor,
         src_locs: torch.Tensor,
-        masks: torch.Tensor,
-        time: torch.Tensor,
-    ):  
+        time: Dict[str, torch.Tensor],
+    ):
         batch_size, n_stations = x.size(0), x.size(1)
-        # time_mean_ = x.new_tensor([0, 1, 1, 0])
-        # time_std_ = x.new_tensor([24, 31, 12, 24])
-        # time = (time - time_mean_) / time_std_
 
-        # x = torch.cat((x, time), dim=-1).float()
+        # time_embed.shape == (batch_size, seq_len, n_timefeats)
+        time_embed = self.time_embedding(time)
+        time_embed = time_embed.unsqueeze(1).repeat_interleave(n_stations, 1)
 
-        time = time.reshape(batch_size * n_stations, -1, time.size(-1))
-        hour_embed = self.hour_embedding(time[..., 0]).view(batch_size, n_stations, -1, self.time_embedding_dim)
-        day_embed = self.day_embedding(time[..., 1] - 1).view(batch_size, n_stations, -1, self.time_embedding_dim)
-        month_embed = self.month_embedding(time[..., 2] - 1).view(batch_size, n_stations, -1, self.time_embedding_dim)
-        solar_term_embed = self.solar_term_embedding(time[..., 3]).view(batch_size, n_stations, -1, self.time_embedding_dim)
+        x = torch.cat((x, time_embed), dim=-1).float()
 
-        x = torch.cat((x, hour_embed, day_embed, month_embed, solar_term_embed), dim=-1).float()
-
-        src_locs = (src_locs - src_locs.mean(1, keepdim=True)) / src_locs.std(1, keepdim=True)
-        loc_embed = self.loc_embedding(src_locs).unsqueeze(2).repeat_interleave(x.size(2), 2)
+        # src_locs = (src_locs - src_locs.mean(1, keepdim=True)) / src_locs.std(1, keepdim=True)
+        loc_embed = self.loc_embedding(src_locs).view(-1, self.loc_embedding_dim)
+        loc_embed = self.loc_norm(loc_embed)
+        loc_embed = loc_embed.view(batch_size, n_stations, -1).unsqueeze(2).repeat_interleave(x.size(2), 2)
 
         x = torch.cat((x, loc_embed), dim=-1)
         # features.shape == (batch_size, extractor_size, n_stations)
         features = self.extractor(x)
-        
-        _feats = x.new_zeros(batch_size, features.size(1), self.ff_size)
-        for i in range(batch_size):
-            masks_ = masks[i]
-            _feats[i] = torch.matmul(features[i, :, masks_], self.linear3[masks_])
-        features = _feats
 
         features = self.st_layer(features)
 
@@ -85,17 +76,24 @@ class DAQFFModel(BaseAQFModel):
 
         return outs * self.target_normalize_std + self.target_normalize_mean
 
+    def time_embedding(self, time: Dict[str, torch.Tensor]):
+        # shape (batch_size, seq_len)
+        hour_embed = self.hour_embedding(time["hour"])
+        day_embed = self.day_embedding(time["day"] - 1)
+        month_embed = self.month_embedding(time["month"] - 1)
+        solar_term_embed = self.solar_term_embedding(time["solar_term"])
+
+        time_embed = torch.cat((hour_embed, day_embed, month_embed, solar_term_embed), dim=-1)
+
+        return time_embed
+
     def compute_loss(self, input: torch.Tensor, target: torch.Tensor, reduction: str = "mean"):
         loss = F.l1_loss(input, target, reduction=reduction)
-
-        # loss = loss.mean(-1).sqrt()
-
-        # loss = loss.sum() / loss.size(0)
 
         return loss
 
     def training_step(self, batch, batch_idx):
-        outs = self(batch["features"], batch["src_locs"], batch["src_masks"], batch["time"])
+        outs = self(batch["metero"], batch["src_locs"], batch["time"])
 
         loss = self.compute_loss(outs, batch["src_nexts"].float(), reduction="mean")
 
@@ -105,24 +103,11 @@ class DAQFFModel(BaseAQFModel):
 
     def validation_step(self, batch, batch_idx):
         # pres.shape == (batch_size, n_src_stations, output_size)
-        outs = self(batch["features"], batch["src_locs"], batch["src_masks"], batch["time"])
+        outs = self(batch["metero"], batch["src_locs"], batch["time"])
 
-        # src_outs = src_outs * self.target_normalize_std + self.target_normalize_mean
-
-        # batch_size = src_outs.size(0)
-        # preds = src_outs.new_zeros(batch_size, src_outs.size(2))
-
-        # for i in range(batch_size):
-        #     masks = batch["src_masks"][i]
-        #     src_locs = batch["src_locs"][i, masks].unsqueeze(0)
-        #     tar_loc = batch["tar_loc"][i].unsqueeze(0)
-
-        #     weights = inverse_distance_weighted(src_locs, tar_loc, beta=1.0).squeeze(0)
-        #     preds[i] = (src_outs[i, masks] * weights).sum(0)
-
-        # return self.metrics(tar_outs, batch["gt_target"])
-        # mae = (outs - batch["src_nexts"].float()).abs().mean()
-        mae = self.compute_loss(outs, batch["src_nexts"].float(), reduction="sum")
+        # mae = self.compute_loss(outs, batch["src_nexts"].float(), reduction="sum")
+        mae = (outs - batch["src_nexts"]).abs().sum(-1)
+        mae = mae.mean()
 
         return {"mae": mae}
 
@@ -131,20 +116,13 @@ class DAQFFModel(BaseAQFModel):
         st = self.training
         self.train(False)
         with torch.no_grad():
-            # add batch dim
-            features = dt["features"].unsqueeze(0).to(self.device)
-            src_locs = dt["src_locs"].unsqueeze(0).to(self.device)
-            # tar_loc = tar_loc.unsqueeze(0).to(self.device)
-            src_masks = dt["src_masks"].unsqueeze(0).to(self.device)
+            metero = dt["metero"].to(self.device).unsqueeze(0)
+            src_locs = dt["src_locs"].to(self.device).unsqueeze(0)
 
-            output = self(features, src_locs, src_masks).squeeze(0)
-            # inverse transforms
-            # output.shape == (n_src_stations, output_size)
-            output = output * self.target_normalize_std + self.target_normalize_mean
-
-            # weights.shape == (n_src_st', 1)
-            # weights = inverse_distance_weighted(src_locs[:, src_masks[0]], tar_loc, beta=1.0).squeeze(0)
-
-            # output = (output[src_masks[0]] * weights).sum(0)
+            for k in dt["time"]:
+                dt["time"][k] = dt["time"][k].to(self.device).unsqueeze(0)
+            
+            preds = self(metero, src_locs, dt["time"])
         self.train(st)
-        return output
+
+        return preds

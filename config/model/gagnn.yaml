@@ -16,7 +16,7 @@ training:
   num_groups: 3
   inseq_len: 168
   outseq_len: 24
-  dropout: 0.0
+  dropout: 0.2
 
   optim:
     lr: 0.0005

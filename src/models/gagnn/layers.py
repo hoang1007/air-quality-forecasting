@@ -157,6 +157,7 @@ class GAGNNEncoder(nn.Module):
         for i in range(self.num_gnn_layers):
             new_x = self.global_gnn[i](new_x, edge_ids, edge_weights)
 
+        new_x = new_x.view(batch_size, self.num_stations, -1)
         return new_x, gr_edge_weights, gr_edge_ids
 
 
