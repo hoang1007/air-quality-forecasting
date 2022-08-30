@@ -15,36 +15,7 @@ class BaseAQFModel(LightningModule):
         self.save_hyperparameters()
 
     def compute_loss(self, input: torch.Tensor, target: torch.Tensor):
-        loss = F.mse_loss(input, target, reduction="none")
-
-        loss = loss.mean(-1).sqrt()
-
-        loss = loss.sum() / loss.size(0)
-
-        return loss
-
-    def predict(self, dt):
-        st = self.training
-        self.train(False)
-        with torch.no_grad():
-            # add batch dim
-            features = dt["features"].unsqueeze(0).to(self.device)
-            src_locs = dt["src_locs"].unsqueeze(0).to(self.device)
-            src_masks = dt["src_masks"].unsqueeze(0).to(self.device)
-
-            output = self(features, src_locs, src_masks).squeeze(0)
-            # inverse transforms
-            output = output * self.target_normalize_std + self.target_normalize_mean
-
-        self.train(st)
-        return output
-
-    def training_step(self, batch, batch_idx):
-        outs = self(batch["features"], batch["src_locs"], batch["src_masks"])
-
-        loss = self.compute_loss(outs, batch["src_nexts"])
-
-        self.log("loss", loss.item())
+        loss = F.mse_loss(input, target, reduction="mean")
 
         return loss
 
@@ -57,16 +28,6 @@ class BaseAQFModel(LightningModule):
         loss /= len(outputs)
 
         self.log("epoch_loss", loss)
-
-    def validation_step(self, batch, batch_idx):
-        # pres.shape == (batch_size, n_src_stations, output_size)
-        outs = self(batch["features"], batch["src_locs"], batch["src_masks"])
-
-        outs = outs * self.target_normalize_std + self.target_normalize_mean
-
-        mae = (outs - batch["src_nexts"]).abs().mean()
-
-        return {"mae": mae}
 
     def validation_epoch_end(self, val_outputs):
         metrics = {}
