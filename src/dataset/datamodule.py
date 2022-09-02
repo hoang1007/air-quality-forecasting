@@ -181,10 +181,6 @@ class AirQualityDataset(Dataset):
         out = []
 
         for col in usecols:
-
-            if df[col].isna().sum() > 0:
-                print(df[df[col].isna()])
-
             assert df[col].isna().sum() == 0, "Data must not contains nan values"
             datacol = torch.tensor(df[col].values, dtype=torch.float32)
 
