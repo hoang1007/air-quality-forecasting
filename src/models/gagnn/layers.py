@@ -42,8 +42,9 @@ class GAGNNEncoder(nn.Module):
         super().__init__()
 
         self.num_stations = config["num_stations"]
-        self.n_features = config["n_features"] + 4 * config["time_embedding_dim"]
+        self.n_features = config["n_features"]
         self.input_embedding_dim = config["input_embedding_dim"]
+        self.time_embedding_dim = config["time_embedding_dim"]
         self.loc_embedding_dim = config["loc_embedding_dim"]
         self.num_gnn_layers = config["num_enc_gnn_layers"]
         self.num_attn_heads = config["num_attn_heads"]
@@ -75,7 +76,7 @@ class GAGNNEncoder(nn.Module):
         self.loc_embedding = nn.Linear(2, self.loc_embedding_dim)
 
         self.edge_inf = nn.Sequential(
-            nn.Linear(self.input_embedding_dim * 2 + self.loc_embedding_dim * 2, self.edge_dim),
+            nn.Linear(self.input_embedding_dim * 2 + self.loc_embedding_dim * 2 + self.time_embedding_dim * 4, self.edge_dim),
             nn.Dropout(p=self.dropout),
             nn.ReLU(inplace=True),
         )
@@ -102,6 +103,7 @@ class GAGNNEncoder(nn.Module):
         self,
         x: torch.Tensor,
         locs: torch.Tensor,
+        time_embed: torch.Tensor,
         edge_weights: torch.Tensor,
         edge_ids: torch.Tensor
     ):
@@ -129,12 +131,12 @@ class GAGNNEncoder(nn.Module):
             for j in range(self.num_groups):
                 if i == j:
                     continue
-                gr_edge_in = torch.cat((group_feats[:, i], group_feats[:, j]), dim=-1)
+                gr_edge_in = torch.cat((group_feats[:, i], group_feats[:, j], time_embed), dim=-1)
                 gr_edge_attr = self.edge_inf(gr_edge_in)
                 gr_edge_idx = x.new_tensor([i, j], dtype=torch.long)
 
                 gr_edge_weights.append(gr_edge_attr)
-                gr_edge_ids.append(gr_edge_idx)  
+                gr_edge_ids.append(gr_edge_idx)
 
         gr_edge_weights = torch.stack(gr_edge_weights, dim=1)
         gr_edge_ids = torch.stack(gr_edge_ids, dim=1).unsqueeze(0)

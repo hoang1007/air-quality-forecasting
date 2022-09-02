@@ -186,8 +186,7 @@ class AirQualityDataset(Dataset):
                 print(df[df[col].isna()])
 
             assert df[col].isna().sum() == 0, "Data must not contains nan values"
-            datacol = df[col].to_numpy(dtype=float)
-            datacol = torch.from_numpy(datacol)
+            datacol = torch.tensor(df[col].values, dtype=torch.float32)
 
             if norm:
                 datacol = (datacol - self.mean_[col]) / self.std_[col]

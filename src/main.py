@@ -116,7 +116,7 @@ def test(cfg, device):
 def run(cfg):
     pl.seed_everything(3107)
 
-    cfg.mode = "test"
+    # cfg.mode = "test"
 
     if cfg.mode == "train":
         train(cfg.model, cfg.device)

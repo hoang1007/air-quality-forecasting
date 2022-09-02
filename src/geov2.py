@@ -4,7 +4,7 @@ from models import *
 from hydra import initialize, compose
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 import matplotlib.pyplot as plt
 
 
@@ -19,7 +19,7 @@ LOGDIR = os.path.join(ROOTDIR, "logs")
 EXPORT_DIR = os.path.join(ROOTDIR, "submit")
 
 pl.seed_everything(3107)
-model = AQFBaseGAGNN(
+model = GAGNNModel(
     cfg.training, cfg.data.normalize_mean["PM2.5"], cfg.data.normalize_std["PM2.5"])
 
 
@@ -35,7 +35,8 @@ def train(n_epochs: int, batch_size: int):
     )
 
     ckpt = ModelCheckpoint(CKPT_DIR, filename="gagnn")
-    logger = TensorBoardLogger(LOGDIR, name="gagnn", version="bruh-loc_embed", default_hp_metric=False)
+    lr_monitor = LearningRateMonitor("epoch")
+    logger = TensorBoardLogger(LOGDIR, name="gagnn", version="time_embed_v2", default_hp_metric=False)
     trainer = pl.Trainer(
         logger=logger,
         max_epochs=n_epochs,
@@ -58,7 +59,7 @@ def test():
         data_set="train"
     )
 
-    model.load_from_checkpoint("ckpt/gagnn-v1.ckpt")
+    model.load_from_checkpoint("ckpt/gagnn-v2.ckpt")
 
     dt = dts[0]
 
@@ -92,8 +93,8 @@ def test():
 
     out = model.predict(dts[0])
 
-    print(dts[0]["src_nexts"])
-    print(out)
+    print(dts[0]["src_nexts"] - out)
+    # print(out)
 
 	# print(dts[0]["gt_target"])
 

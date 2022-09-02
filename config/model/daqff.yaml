@@ -2,8 +2,8 @@ training:
   batch_size: 16
   epochs: 20
   
-  n_stations: 12 # nejing is 12 else 11
-  n_features: 11 # bejing is 11 else 3
+  n_stations: 11 # nejing is 12 else 11
+  n_features: 3 # bejing is 11 else 3
   seq_len: 168
 
   dropout: 0.3

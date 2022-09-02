@@ -2,8 +2,8 @@ training:
   batch_size: 8
   epochs: 10
 
-  n_features: 11 # bejing is 11 else 3
-  num_stations: 12 # bejing is 12 else 11
+  n_features: 3 # bejing is 11 else 3
+  num_stations: 11 # bejing is 12 else 11
   input_embedding_dim: 64
   loc_embedding_dim: 12
   time_embedding_dim: 8
@@ -23,9 +23,9 @@ training:
     optimizer: "adam"
     sgd:
       momentum: 0.9
-      weight_decay: 0.7
+      weight_decay: 0.001
     adam:
-      weight_decay: 0.1
+      weight_decay: 0.001
     scheduler: "plateau"
     steplr:
       step_size: 10
