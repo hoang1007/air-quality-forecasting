@@ -40,7 +40,7 @@ def train(n_epochs: int, batch_size: int):
     trainer = pl.Trainer(
         logger=logger,
         max_epochs=n_epochs,
-        callbacks=[ckpt],
+        callbacks=[ckpt, lr_monitor],
         accelerator="gpu",
         log_every_n_steps=8
     )

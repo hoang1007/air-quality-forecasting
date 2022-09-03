@@ -97,7 +97,7 @@ class AirQualityDataset(Dataset):
         inputs = []
         in_locs = []
         src_nexts = []
-        time, time_next = None, None
+        time = None
 
         in_start_idx = idx * self.outseq_len
         in_end_idx = in_start_idx + self.inseq_len
@@ -112,7 +112,7 @@ class AirQualityDataset(Dataset):
             pm25_next = self._metero_to_tensor(next_df, usecols=["PM2.5"], norm=False).squeeze_(-1)
 
             if time is None:
-                time, time_next = self._time_to_tensor(df)
+                time = self._time_to_tensor(df)
 
             inputs.append(metero)
             in_locs.append(torch.tensor(station["loc"], dtype=torch.float))
@@ -131,7 +131,6 @@ class AirQualityDataset(Dataset):
         return {
             "metero": torch.stack(inputs, dim=0),
             "time": time,
-            "time_next": time_next,
             "src_nexts": torch.stack(src_nexts, dim=0),
             "src_locs": torch.stack(in_locs, dim=0),
             "targets": torch.stack(targets, dim=0),
@@ -143,7 +142,7 @@ class AirQualityDataset(Dataset):
         
         inputs = []
         in_locs = []
-        time, time_next = None, None
+        time = None
 
         for station in dt.values():
             df = station["data"]
@@ -152,7 +151,7 @@ class AirQualityDataset(Dataset):
             inputs.append(metero)
 
             if time is None:
-                time, time_next = self._time_to_tensor(df)
+                time = self._time_to_tensor(df)
 
             in_locs.append(torch.tensor(station["loc"], dtype=torch.float))
 
@@ -161,7 +160,6 @@ class AirQualityDataset(Dataset):
         return {
             "metero": torch.stack(inputs, dim=0),
             "time": time,
-            "time_next": time_next,
             "src_locs": torch.stack(in_locs, dim=0),
             "tar_locs": torch.tensor(tar_locs, dtype=torch.float),
             "folder_name": self.data["folder_name"][idx]
@@ -193,44 +191,22 @@ class AirQualityDataset(Dataset):
 
     def _time_to_tensor(
         self,
-        df: pd.DataFrame,
-        return_time_next: bool = True
+        df: pd.DataFrame
     ):
         time = {
             "hour": [],
-            "day": [],
+            "weekday": [],
             "solar_term": [],
-            "month": []
         }
 
         for date in df["timestamp"]:
             date = datetime.strptime(date, "%d/%m/%Y %H:%M")
 
             time["hour"].append(date.hour)
-            time["day"].append(date.day)
+            time["weekday"].append(date.isoweekday())
             time["solar_term"].append(get_solar_term(date))
-            time["month"].append(date.month)
 
         for k in time:
             time[k] = torch.tensor(time[k], dtype=torch.long)
 
-        if return_time_next:
-            time_next = {
-                "hour": [],
-                "day": [],
-                "solar_term": [],
-                "month": []
-            }
-
-            for date in get_next_period(date, len=self.outseq_len):
-                time_next["hour"].append(date.hour)
-                time_next["day"].append(date.day)
-                time_next["solar_term"].append(get_solar_term(date))
-                time_next["month"].append(date.month)
-
-            for k in time_next:
-                time_next[k] = torch.tensor(time_next[k], dtype=torch.long)
-            
-            return time, time_next
-        else:
-            return time
+        return time

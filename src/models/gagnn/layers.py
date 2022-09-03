@@ -76,7 +76,7 @@ class GAGNNEncoder(nn.Module):
         self.loc_embedding = nn.Linear(2, self.loc_embedding_dim)
 
         self.edge_inf = nn.Sequential(
-            nn.Linear(self.input_embedding_dim * 2 + self.loc_embedding_dim * 2 + self.time_embedding_dim * 4, self.edge_dim),
+            nn.Linear(self.input_embedding_dim * 2 + self.loc_embedding_dim * 2 + self.time_embedding_dim * 3, self.edge_dim),
             nn.Dropout(p=self.dropout),
             nn.ReLU(inplace=True),
         )

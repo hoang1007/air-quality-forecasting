@@ -32,9 +32,9 @@ training:
     optimizer: "adam"
     sgd:
       momentum: 0.9
-      weight_decay: 0.7
+      weight_decay: 0.01
     adam:
-      weight_decay: 0.1
+      weight_decay: 0.01
     scheduler: "plateau"
     steplr:
       step_size: 20

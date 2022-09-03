@@ -24,8 +24,7 @@ class GAGNNModel(BaseAQFModel):
 
         self.hour_embedding = nn.Embedding(24, self.time_embedding_dim)
         self.solar_term_embedding = nn.Embedding(24, self.time_embedding_dim)
-        self.day_embedding = nn.Embedding(31, self.time_embedding_dim)
-        self.month_embedding = nn.Embedding(12, self.time_embedding_dim)
+        self.weekday_embedding = nn.Embedding(7, self.time_embedding_dim)
 
         self.encoder = GAGNNEncoder(config)
         self.decoder = GAGNNDecoder(config)
@@ -71,11 +70,11 @@ class GAGNNModel(BaseAQFModel):
     def time_embedding(self, time: Dict[str, torch.Tensor]):
         # shape (batch_size, seq_len)
         hour_embed = self.hour_embedding(time["hour"][:, 0])
-        day_embed = self.day_embedding(time["day"][:, 0] - 1)
-        month_embed = self.month_embedding(time["month"][:, 0] - 1)
+        weekday_embed = self.weekday_embedding(time["weekday"][:, 0] - 1)
+        # month_embed = self.month_embedding(time["month"][:, 0] - 1)
         solar_term_embed = self.solar_term_embedding(time["solar_term"][:, 0])
 
-        time_embed = torch.cat((hour_embed, day_embed, month_embed, solar_term_embed), dim=-1)
+        time_embed = torch.cat((hour_embed, weekday_embed, solar_term_embed), dim=-1)
 
         return time_embed
 
@@ -138,8 +137,7 @@ class AQFBaseGAGNN(BaseAQFModel):
 
         self.hour_embedding = nn.Embedding(24, self.time_embedding_dim)
         self.solar_term_embedding = nn.Embedding(24, self.time_embedding_dim)
-        self.day_embedding = nn.Embedding(31, self.time_embedding_dim)
-        self.month_embedding = nn.Embedding(12, self.time_embedding_dim)
+        self.weekday_embedding = nn.Embedding(7, self.time_embedding_dim)
 
         self.encoder = GAGNNEncoder(config)
         self.decoder_embedding = nn.Linear(self.gnn_dim, self.input_embedding_dim)
@@ -231,11 +229,11 @@ class AQFBaseGAGNN(BaseAQFModel):
     def time_embedding(self, time: Dict[str, torch.Tensor]):
         # shape (batch_size, seq_len)
         hour_embed = self.hour_embedding(time["hour"][:, 0])
-        day_embed = self.day_embedding(time["day"][:, 0] - 1)
-        month_embed = self.month_embedding(time["month"][:, 0] - 1)
+        day_embed = self.weekday_embedding(time["weekday"][:, 0] - 1)
+        # month_embed = self.month_embedding(time["month"][:, 0] - 1)
         solar_term_embed = self.solar_term_embedding(time["solar_term"][:, 0])
 
-        time_embed = torch.cat((hour_embed, day_embed, month_embed, solar_term_embed), dim=-1)
+        time_embed = torch.cat((hour_embed, day_embed, solar_term_embed), dim=-1)
 
         return time_embed
 

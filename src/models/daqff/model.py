@@ -21,13 +21,12 @@ class DAQFFModel(BaseAQFModel):
         self.ff_size = config["ff_size"]
         self.time_embedding_dim = 16
         self.loc_embedding_dim = 12
-        self.n_features = config["n_features"] + 4 * self.time_embedding_dim + self.loc_embedding_dim
+        self.n_features = config["n_features"] + 3 * self.time_embedding_dim + self.loc_embedding_dim
 
         self.loc_embedding = nn.Linear(2, self.loc_embedding_dim)
         self.hour_embedding = nn.Embedding(24, self.time_embedding_dim)
         self.solar_term_embedding = nn.Embedding(24, self.time_embedding_dim)
-        self.day_embedding = nn.Embedding(31, self.time_embedding_dim)
-        self.month_embedding = nn.Embedding(12, self.time_embedding_dim)
+        self.weekday_embedding = nn.Embedding(31, self.time_embedding_dim)
 
         self.loc_norm = nn.BatchNorm1d(self.loc_embedding_dim)
 
@@ -36,14 +35,6 @@ class DAQFFModel(BaseAQFModel):
 
         self.linear1 = nn.Linear(config["lstm_output_size"], config["n_stations"])
         self.linear2 = nn.Linear(1, config["output_size"])
-
-        self.register_parameter("linear3", self._init_feedforward(config["n_stations"], self.ff_size))
-    
-    def _init_feedforward(self, input_size, output_size):
-        weights = torch.zeros((input_size, output_size))
-        nn.init.xavier_uniform_(weights)
-
-        return nn.parameter.Parameter(weights, requires_grad=True)
 
     def forward(
         self,
@@ -79,11 +70,11 @@ class DAQFFModel(BaseAQFModel):
     def time_embedding(self, time: Dict[str, torch.Tensor]):
         # shape (batch_size, seq_len)
         hour_embed = self.hour_embedding(time["hour"])
-        day_embed = self.day_embedding(time["day"] - 1)
-        month_embed = self.month_embedding(time["month"] - 1)
+        weekday_embed = self.weekday_embedding(time["weekday"] - 1)
+        # month_embed = self.month_embedding(time["month"] - 1)
         solar_term_embed = self.solar_term_embedding(time["solar_term"])
 
-        time_embed = torch.cat((hour_embed, day_embed, month_embed, solar_term_embed), dim=-1)
+        time_embed = torch.cat((hour_embed, weekday_embed, solar_term_embed), dim=-1)
 
         return time_embed
 
