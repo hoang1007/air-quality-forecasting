@@ -102,11 +102,19 @@ class TrafficTransformerEncoder(nn.Module):
         self.fc1 = nn.Linear(self.gcn_dim, self.gcn_dim)
         self.dropout = nn.Dropout(p=config["dropout"])
 
-        self.transformer_enc = TransformerEncoderLayer(
-            dmodel=self.gcn_dim,
+        # self.transformer_enc = TransformerEncoderLayer(
+        #     dmodel=self.gcn_dim,
+        #     nhead=self.num_attn_heads,
+        #     expansion_factor=config["expansion_factor"],
+        #     dropout=config["dropout"]
+        # )
+
+        self.transformer_enc = nn.TransformerEncoderLayer(
+            d_model=self.gcn_dim,
             nhead=self.num_attn_heads,
-            expansion_factor=config["expansion_factor"],
-            dropout=config["dropout"]
+            dim_feedforward=self.gcn_dim * config["expansion_factor"],
+            dropout=config["dropout"],
+            batch_first=True
         )
 
     def forward(
@@ -128,8 +136,14 @@ class TrafficTransformerEncoder(nn.Module):
         # gcn_outs = self.dropout(gcn_outs + pos_embedding)
         gcn_outs = gcn_outs.view(-1, inseq_len, self.gcn_dim)
 
-        outs = self.transformer_enc(gcn_outs, pos_embedding).view(batch_size, n_stations, inseq_len, self.gcn_dim)
+        if isinstance(self.transformer_enc, nn.TransformerEncoderLayer):
+            gcn_outs = self.dropout(gcn_outs + pos_embedding)
+            outs = self.transformer_enc(gcn_outs)
+        else:
+            raise ValueError
+            outs = self.transformer_enc(gcn_outs, pos_embedding).view(batch_size, n_stations, inseq_len, self.gcn_dim)
 
+        outs = outs.view(batch_size, n_stations, inseq_len, self.gcn_dim)
         return outs
 
 
@@ -154,14 +168,23 @@ class TrafficTransformerDecoder(nn.Module):
         self.num_attn_heads = config["num_attn_heads"]
 
         self.pos_encoder = PositionalEmbedding(self.embedding_dim)
-        self.graph_conv = GraphConv(self.n_features, self.gcn_dim, self.gcn_hidden_dim)
+        self.graph_conv = GCN(self.n_features, self.gcn_dim, self.gcn_hidden_dim, config["dropout"])
         self.fc1 = nn.Linear(self.gcn_dim, self.gcn_dim)
+        self.dropout = nn.Dropout(p=config["dropout"])
 
-        self.transformer_dec = TransformerDecoderLayer(
-            dmodel=self.gcn_dim,
+        # self.transformer_dec = TransformerDecoderLayer(
+        #     dmodel=self.gcn_dim,
+        #     nhead=self.num_attn_heads,
+        #     expansion_factor=config["expansion_factor"],
+        #     dropout=config["dropout"]
+        # )
+
+        self.transformer_dec = nn.TransformerDecoderLayer(
+            d_model=self.gcn_dim,
             nhead=self.num_attn_heads,
-            expansion_factor=config["expansion_factor"],
-            dropout=config["dropout"]
+            dim_feedforward=self.gcn_dim * config["expansion_factor"],
+            dropout=config["dropout"],
+            batch_first=True
         )
 
     def forward(
@@ -189,10 +212,24 @@ class TrafficTransformerDecoder(nn.Module):
         dec_in = gcn_outs.view(-1, outseq_len, self.gcn_dim)
         enc_out = enc_out.view(-1, inseq_len, self.gcn_dim)
 
-        outs = self.transformer_dec(dec_in, enc_out, enc_pos_embedding, dec_pos_embedding)
+        if isinstance(self.transformer_dec, nn.TransformerDecoderLayer):
+            dec_in = self.dropout(dec_in + dec_pos_embedding)
+            outs = self.transformer_dec(dec_in, enc_out, tgt_mask=self._create_subsequent_mask(dec_in))
+        else:
+            raise ValueError
+            outs = self.transformer_dec(dec_in, enc_out, enc_pos_embedding, dec_pos_embedding)
         outs = outs.view(batch_size, n_tar_stations, outseq_len, self.gcn_dim)
         
         return outs
+
+    def _create_subsequent_mask(self, x: torch.Tensor):
+        batch_size, seq_len, _ = x.shape
+
+        # mask = torch.triu(-1 * torch.ones(
+        #     seq_len, seq_len, device=x.device, dtype=torch.int), diagonal=1) + 1
+        mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool), diagonal=1)
+
+        return mask.unsqueeze(0).repeat_interleave(batch_size * self.num_attn_heads, 0)
 
 
 if __name__ == '__main__':

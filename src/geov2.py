@@ -45,9 +45,9 @@ def train(n_epochs: int, batch_size: int):
         log_every_n_steps=8
     )
 
-    # trainer.fit(model, dtm)
-    lr_finder = trainer.tuner.lr_find(model, dtm)
-    lr_finder.plot(suggest=True)
+    trainer.fit(model, dtm)
+    # lr_finder = trainer.tuner.lr_find(model, dtm)
+    # lr_finder.plot(suggest=True)
 
 
 def test():
@@ -80,5 +80,5 @@ def test():
 
 if __name__ == "__main__":
     # torch.cuda.empty_cache()
-    # train(20, 16)
-    test()
+    train(20, 16)
+    # test()
