@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 
 with initialize(version_base=None, config_path="../config/model"):
-    cfg = compose(config_name="gagnn.yaml")
+    cfg = compose(config_name="traffic-transformer.yaml")
 
 ROOTDIR = os.getcwd()
 DATADIR = os.path.join(ROOTDIR, "data")
@@ -19,12 +19,12 @@ LOGDIR = os.path.join(ROOTDIR, "logs")
 EXPORT_DIR = os.path.join(ROOTDIR, "submit")
 
 pl.seed_everything(3107)
-model = GAGNNModel(
+model = TrafficTransformer(
     cfg.training, cfg.data.normalize_mean["PM2.5"], cfg.data.normalize_std["PM2.5"])
 
 
 def train(n_epochs: int, batch_size: int):
-    dtm = AirQualityDataModule(
+    dtm = AirQualityDataModule2(
         "./data-full",
         # normalize_mean={"humidity":0, "temperature": 0, "PM2.5": 0},
         # normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
@@ -36,7 +36,7 @@ def train(n_epochs: int, batch_size: int):
 
     ckpt = ModelCheckpoint(CKPT_DIR, filename="gagnn")
     lr_monitor = LearningRateMonitor("epoch")
-    logger = TensorBoardLogger(LOGDIR, name="gagnn", version="time_embed_v2", default_hp_metric=False)
+    logger = TensorBoardLogger(LOGDIR, name="ttf", version="v1", default_hp_metric=False)
     trainer = pl.Trainer(
         logger=logger,
         max_epochs=n_epochs,
@@ -45,11 +45,13 @@ def train(n_epochs: int, batch_size: int):
         log_every_n_steps=8
     )
 
-    trainer.fit(model, dtm)
+    # trainer.fit(model, dtm)
+    lr_finder = trainer.tuner.lr_find(model, dtm)
+    lr_finder.plot(suggest=True)
 
 
 def test():
-    dts = AirQualityDataset(
+    dts = AirQualityDataset2(
         "data-full",
         # normalize_mean={"humidity":0, "temperature": 0, "PM2.5": 0},
         # normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
@@ -59,46 +61,24 @@ def test():
         data_set="train"
     )
 
-    model.load_from_checkpoint("ckpt/gagnn-v2.ckpt")
+    model.load_from_checkpoint("ckpt/ttf-v2.ckpt")
 
-    dt = dts[0]
+    pred, target = model.predict(dts[1])
 
-    probs = torch.softmax(model.encoder.weights, dim=-1)
-    print(probs)
-    station_groups = probs.max(-1).indices.cpu().tolist()
-    print(station_groups)
+    fig, axes = plt.subplots(4, 3, figsize=(20, 20), dpi=100)
+    plt.tight_layout()
 
-    src_stations = [
-        "Tran Quoc Toan",
-        "Quan Hoa",
-        "DHQG Ha Noi",
-        "Hang Trong",
-        "Ngoc Khanh",
-        "Lomonoxop",
-        "GENESIS",
-        "Yen So",
-        "Ba Trieu",
-        "Tran Quang Khai",
-        "Ton That Thuyet"
-    ]
+    for i in range(pred.size(0)):
+        row_idx = i // 3
+        col_idx = i % 3
+        ax = axes[row_idx, col_idx]
 
-    offset_x = -0
-    offset_y = 0
-
-    for i in range(11):
-        plt.text(dt["src_locs"][i, 0].item() + offset_x, dt["src_locs"][i, 1].item() + offset_y, s=src_stations[i], fontsize=10)
-    plt.scatter(dt["src_locs"][:, 0], dt["src_locs"][:, 1], c=station_groups, cmap="spring", linewidths=3)
+        ax.plot(pred[i].cpu())
+        ax.plot(target[i].cpu())
+        ax.legend(["Predicted", "Actual"])
     plt.show()
 
-
-    out = model.predict(dts[0])
-
-    print(dts[0]["src_nexts"] - out)
-    # print(out)
-
-	# print(dts[0]["gt_target"])
-
 if __name__ == "__main__":
-    torch.cuda.empty_cache()
-    train(20, 16)
-    # test()
+    # torch.cuda.empty_cache()
+    # train(20, 16)
+    test()

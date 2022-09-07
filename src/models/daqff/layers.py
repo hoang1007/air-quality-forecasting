@@ -1,7 +1,6 @@
 from typing import List
 import torch
 from torch import nn
-from utils.functional import scale_softmax
 
 
 class Conv1dExtractor(nn.Module):
@@ -120,7 +119,7 @@ class AIDWLayer(nn.Module):
             attn = torch.sigmoid(attn)
 
             
-            attn[__src_masks] = scale_softmax((attn[__src_masks] * id_weights), dim=0)
+            attn[__src_masks] = torch.softmax((attn[__src_masks] * id_weights), dim=0)
 
             # out[i] = (features[i, __src_masks] * id_weights).sum(0)
             out[i] = (features[i] * attn).sum(0)

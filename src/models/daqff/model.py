@@ -2,7 +2,7 @@ from typing import Dict
 from torch import nn
 import torch.nn.functional as F
 from .layers import *
-from utils.functional import inverse_distance_weighted, scale_softmax
+from utils.functional import inverse_distance_weighted
 from models import BaseAQFModel
 
 
