@@ -61,7 +61,7 @@ def test():
         data_set="train"
     )
 
-    model.load_from_checkpoint("ckpt/ttf-v2.ckpt")
+    model.load_from_checkpoint("ckpt/ttf-v1.ckpt")
 
     pred, target = model.predict(dts[1])
 
@@ -80,5 +80,5 @@ def test():
 
 if __name__ == "__main__":
     # torch.cuda.empty_cache()
-    train(20, 16)
-    # test()
+    # train(20, 1)
+    test()

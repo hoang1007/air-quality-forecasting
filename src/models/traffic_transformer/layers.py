@@ -98,7 +98,8 @@ class TrafficTransformerEncoder(nn.Module):
         self.num_attn_heads = config["num_attn_heads"]
 
         self.pos_encoder = PositionalEmbedding(self.embedding_dim)
-        self.graph_conv = GCN(self.n_features, self.gcn_dim, self.gcn_hidden_dim, config["dropout"])
+        # self.graph_conv = GCN(self.n_features, self.gcn_dim, self.gcn_hidden_dim, config["dropout"])
+        self.graph_conv = GraphConv(self.n_features, self.gcn_dim)
         self.fc1 = nn.Linear(self.gcn_dim, self.gcn_dim)
         self.dropout = nn.Dropout(p=config["dropout"])
 
@@ -168,7 +169,8 @@ class TrafficTransformerDecoder(nn.Module):
         self.num_attn_heads = config["num_attn_heads"]
 
         self.pos_encoder = PositionalEmbedding(self.embedding_dim)
-        self.graph_conv = GCN(self.n_features, self.gcn_dim, self.gcn_hidden_dim, config["dropout"])
+        # self.graph_conv = GCN(self.n_features, self.gcn_dim, self.gcn_hidden_dim, config["dropout"])
+        self.graph_conv = GraphConv(self.n_features, self.gcn_dim)
         self.fc1 = nn.Linear(self.gcn_dim, self.gcn_dim)
         self.dropout = nn.Dropout(p=config["dropout"])
 
