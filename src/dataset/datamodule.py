@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from pytorch_lightning import LightningDataModule
 from datetime import datetime
-from .raw_data import air_quality_train_data, air_quality_test_data
+from .raw_data import public_train_data, public_test_data
 from utils.functional import get_solar_term, get_next_period
 
 def default_fillnan_fn(x: pd.Series):
@@ -66,13 +66,13 @@ class AirQualityDataset(Dataset):
         self.std_ = normalize_std
 
         if data_set == "train":
-            self.data = air_quality_train_data(
+            self.data = public_train_data(
                 path.join(rootdir, "data-train")
             )
 
             self._prev_fill_nan()
         elif data_set == "test":
-            self.data = air_quality_test_data(
+            self.data = public_test_data(
                 path.join(rootdir, "public-test"),
                 path.join(rootdir, "data-train")
             )

@@ -3,7 +3,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from models import BaseAQFModel
-from .layers import *
+from .layers import (
+    TrafficTransformerEncoder,
+    TrafficTransformerDecoder,
+    positional_encoding
+)
 
 
 class TrafficTransformer(BaseAQFModel):
@@ -19,17 +23,17 @@ class TrafficTransformer(BaseAQFModel):
             predicted: Tensor (batch_size, num_stations, n_features)
         """
         super().__init__(config, target_normalize_mean, target_normalize_std)
-
+        self.is_predict = True
         self.inseq_len = config["inseq_len"]
         self.outseq_len = config["outseq_len"]
+        self.pos_embedding_dim = config["pos_embedding_dim"]
 
-        self.pos_embedding = PositionalEmbedding(config["pos_embedding_dim"])
         self.encoder = TrafficTransformerEncoder(config)
         self.decoder = TrafficTransformerDecoder(config)
 
-        self.fc = nn.Linear(config["gcn_dim"], config["n_features"])
+        self.fc = nn.Linear(config["gcn_dim"] + config["n_features"], config["n_features"])
 
-        self._init_weights()
+        # self._init_weights()
     
     def _init_weights(self):
         for name, param in self.named_parameters():
@@ -40,45 +44,52 @@ class TrafficTransformer(BaseAQFModel):
 
     def forward(
         self,
-        metero: torch.Tensor,
+        meteo: torch.Tensor,
         locs: torch.Tensor,
         time: Dict[str, torch.Tensor],
-        metero_next: torch.Tensor = None
+        targets: torch.Tensor = None
     ):
-        hpe = self.hybrid_pos_embedding(time)
-        enc_pos_em = hpe[:, :self.inseq_len]
+        pos_embed, periodic_embed = self.hybrid_pos_embedding(time)
+        enc_pos_em = pos_embed[:, :self.inseq_len]
+        enc_periodic_em = periodic_embed[:, :self.inseq_len]
 
-        enc_out = self.encoder(metero, locs, enc_pos_em)
+        enc_out = self.encoder(meteo, locs, enc_pos_em, enc_periodic_em)
 
+        shifted_targets = torch.cat((meteo[:, :, -1].unsqueeze(2), targets[:, :, :-1]), dim=2)
         if self.training:
             dec_start_pos = self.inseq_len - 1
             dec_end_pos = dec_start_pos + self.outseq_len
 
-            dec_pos_em = hpe[:, dec_start_pos : dec_end_pos]
-            outputs = self.decoder(metero_next, enc_out, locs, enc_pos_em, dec_pos_em)
+            dec_pos_em = pos_embed[:, dec_start_pos : dec_end_pos]
+            dec_periodic_em = periodic_embed[:, dec_start_pos : dec_end_pos]
+            outputs = self.decoder(shifted_targets, enc_out, locs, dec_pos_em, enc_periodic_em, dec_periodic_em)
             predicted = self.fc(outputs)
 
             return predicted
         else:
             # eval phase
-            # dec_in = metero[:, :, -1].unsqueeze(2)
-            # dec_start_pos = self.inseq_len - 1
-            # for i in range(1, self.outseq_len + 1):
-            #     dec_pos_em = hpe[:, dec_start_pos : dec_start_pos + i]
-            #     dec_out = self.decoder(dec_in, enc_out, locs, enc_pos_em, dec_pos_em)[:, :, -1]
-            #     dec_out = self.fc(dec_out).unsqueeze(2)
+            if self.is_predict:
+                dec_in = meteo[:, :, -1].unsqueeze(2)
+                dec_start_pos = self.inseq_len - 1
+                for i in range(1, self.outseq_len + 1):
+                    dec_pos_em = pos_embed[:, dec_start_pos : dec_start_pos + i]
+                    dec_periodic_em = periodic_embed[:, dec_start_pos : dec_start_pos + i]
+                    dec_out = self.decoder(dec_in, enc_out, locs, dec_pos_em, enc_periodic_em, dec_periodic_em)[:, :, -1]
+                    dec_out = self.fc(dec_out).unsqueeze(2)
 
-            #     dec_in = torch.cat((dec_in, dec_out), dim=2)
-            
-            # return dec_in[:, :, 1:]
-            dec_start_pos = self.inseq_len - 1
-            dec_end_pos = dec_start_pos + self.outseq_len
+                    dec_in = torch.cat((dec_in, dec_out), dim=2)
+                
+                return dec_in[:, :, 1:]
+            else:
+                dec_start_pos = self.inseq_len - 1
+                dec_end_pos = dec_start_pos + self.outseq_len
 
-            dec_pos_em = hpe[:, dec_start_pos : dec_end_pos]
-            outputs = self.decoder(metero_next, enc_out, locs, enc_pos_em, dec_pos_em)
-            predicted = self.fc(outputs)
+                dec_pos_em = pos_embed[:, dec_start_pos : dec_end_pos]
+                dec_periodic_em = periodic_embed[:, dec_start_pos : dec_end_pos]
+                outputs = self.decoder(shifted_targets, enc_out, locs, dec_pos_em, enc_periodic_em, dec_periodic_em)
+                predicted = self.fc(outputs)
 
-            return predicted
+                return predicted
 
 
     def hybrid_pos_embedding(
@@ -86,41 +97,34 @@ class TrafficTransformer(BaseAQFModel):
         time: Dict[str, torch.Tensor]
     ):
         weekly_ids = time["weekday"]
+        hour = time["hour"]
         global_ids = time["timestamp"]
 
         assert weekly_ids.size(1) == global_ids.size(1), "positional indices must be the same size"
         relative_ids = torch.arange(weekly_ids.size(1), device=self.device)
         relative_ids = relative_ids.unsqueeze(0).repeat_interleave(weekly_ids.size(0), 0)
 
-        weekly_embed = self.pos_embedding(weekly_ids)
-        global_embed = self.pos_embedding(global_ids)
-        relative_embed = self.pos_embedding(relative_ids)
+        weekly_embed = positional_encoding(weekly_ids, 8)
+        hour_embed = positional_encoding(hour, 24)
+        global_embed = positional_encoding(global_ids, self.pos_embedding_dim)
+        relative_embed = positional_encoding(relative_ids, self.pos_embedding_dim)
 
-        hybrid_embed = weekly_embed + global_embed + relative_embed
+        pos_embed = relative_embed + global_embed
+        periodic_embed = torch.cat((weekly_embed, hour_embed), dim=-1)
 
-        return hybrid_embed
+        return pos_embed, periodic_embed
 
     def compute_loss(self, input: torch.Tensor, target: torch.Tensor, reduction: str = "mean"):
         return F.l1_loss(input, target, reduction=reduction)
 
     def training_step(self, batch, batch_idx):
-        metero_next = torch.cat((
-            batch["metero"][:, :, -1].unsqueeze(2),
-            batch["metero_next"][:, :, :-1]
-        ), dim=2)
-
-        outs = self(batch["metero"], batch["src_locs"], batch["time"], metero_next)
+        outs = self(batch["metero"], batch["src_locs"], batch["time"], batch["metero_next"])
 
         loss = self.compute_loss(outs, batch["metero_next"], reduction="mean")
         return loss
 
     def validation_step(self, batch, batch_idx):
-        metero_next = torch.cat((
-            batch["metero"][:, :, -1].unsqueeze(2),
-            batch["metero_next"][:, :, :-1]
-        ), dim=2)
-
-        outs = self(batch["metero"], batch["src_locs"], batch["time"], metero_next)
+        outs = self(batch["metero"], batch["src_locs"], batch["time"], batch["metero_next"])
         preds = outs[..., -1] * self.target_normalize_std + self.target_normalize_mean
         targets = batch["metero_next"][..., -1] * self.target_normalize_std + self.target_normalize_mean
         
@@ -136,13 +140,8 @@ class TrafficTransformer(BaseAQFModel):
 
             for k in dt["time"]:
                 dt["time"][k] = dt["time"][k].to(self.device).unsqueeze(0)
-            
-            metero_next = torch.cat((
-                dt["metero"][:, :, -1].unsqueeze(2),
-                dt["metero_next"][:, :, :-1]
-            ), dim=2)
 
-            outs = self(dt["metero"], dt["src_locs"], dt["time"], metero_next)
+            outs = self(dt["metero"], dt["src_locs"], dt["time"], dt["metero_next"])
             preds = outs[..., -1] * self.target_normalize_std + self.target_normalize_mean
             targets = dt["metero_next"][..., -1] * self.target_normalize_std + self.target_normalize_mean
         self.train(st)

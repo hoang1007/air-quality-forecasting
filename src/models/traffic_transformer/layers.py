@@ -4,82 +4,9 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from .utils import inverse_distance_weighting
-from .transformerv1 import TransformerEncoderLayer, TransformerDecoderLayer, PositionalEmbedding
+from .transformerv1 import TransformerEncoderLayer, TransformerDecoderLayer, positional_encoding
+from torch_geometric.nn import GCNConv
 
-
-class GraphConv(nn.Module):
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
-        """
-        Args:
-            input: Tensor (batch_size, num_vertices, in_features)
-            edge_ids: List of Tensor (2, npairs)
-            edge_weights: List of Tensor (npairs)
-
-        Returns:
-            output: Tensor (batch_size, num_vertices, out_features)
-        """
-        super().__init__()
-
-        self.in_features = in_features
-        self.out_features = out_features
-
-        self._weights, self._bias = self._init_params(bias)
-
-    def _init_params(self, use_bias: bool):
-        weights = torch.zeros(self.in_features, self.out_features)
-        nn.init.xavier_uniform_(weights)
-        weights = nn.parameter.Parameter(weights)
-
-        if use_bias:
-            bias = torch.zeros(self.out_features)
-            nn.init.uniform_(bias)
-            bias = nn.parameter.Parameter(bias)
-        else:
-            bias = None
-
-        return weights, bias
-
-    def forward(self, input: torch.Tensor, edge_ids: List[torch.Tensor], edge_weights: List[torch.Tensor]):
-        # support.shape == (batch_size, V, out_features)
-        support = torch.matmul(input, self._weights)
-        outputs = []
-
-        for i in range(len(edge_ids)):
-            adj = torch.sparse_coo_tensor(
-                indices=edge_ids[i],
-                values=edge_weights[i],
-            )
-
-            out = torch.sparse.mm(adj, support[i])
-            outputs.append(out)
-        outputs = torch.stack(outputs, dim=0)
-
-        if self._bias is not None:
-            outputs = outputs + self._bias
-        
-        return outputs
-
-class GCN(nn.Module):
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        hidden_size: int,
-        dropout: float = 0.1
-    ):
-        super().__init__()
-
-        self.gc1 = GraphConv(in_features, hidden_size)
-        self.gc2 = GraphConv(hidden_size, out_features)
-        self.dropout = nn.Dropout(p=dropout)
-
-    def forward(self, x, edge_ids, edge_weights):
-        x = F.relu(self.gc1(x, edge_ids, edge_weights))
-        x = self.dropout(x)
-        x = self.gc2(x, edge_ids, edge_weights)
-
-        # return F.log_softmax(x, dim=1)
-        return x
 
 class TrafficTransformerEncoder(nn.Module):
     def __init__(self, config):
@@ -97,54 +24,49 @@ class TrafficTransformerEncoder(nn.Module):
         self.gcn_hidden_dim = config["gcn_hidden_dim"]
         self.num_attn_heads = config["num_attn_heads"]
 
-        self.pos_encoder = PositionalEmbedding(self.embedding_dim)
-        # self.graph_conv = GCN(self.n_features, self.gcn_dim, self.gcn_hidden_dim, config["dropout"])
-        self.graph_conv = GraphConv(self.n_features, self.gcn_dim)
+        self.graph_conv = GCNConv(self.n_features, self.gcn_dim)
         self.fc1 = nn.Linear(self.gcn_dim, self.gcn_dim)
-        self.dropout = nn.Dropout(p=config["dropout"])
-
-        # self.transformer_enc = TransformerEncoderLayer(
-        #     dmodel=self.gcn_dim,
-        #     nhead=self.num_attn_heads,
-        #     expansion_factor=config["expansion_factor"],
-        #     dropout=config["dropout"]
-        # )
-
-        self.transformer_enc = nn.TransformerEncoderLayer(
-            d_model=self.gcn_dim,
+        self.dropout = nn.Dropout(config["dropout"])
+        self.transformer_enc = TransformerEncoderLayer(
+            dmodel=self.gcn_dim + self.n_features,
             nhead=self.num_attn_heads,
-            dim_feedforward=self.gcn_dim * config["expansion_factor"],
-            dropout=config["dropout"],
-            batch_first=True
+            expansion_factor=config["expansion_factor"],
+            dropout=config["dropout"]
         )
+
+        # self.transformer_enc = nn.TransformerEncoderLayer(
+        #     d_model=self.gcn_dim + self.n_features,
+        #     nhead=self.num_attn_heads,
+        #     dim_feedforward=self.gcn_dim * config["expansion_factor"],
+        #     dropout=config["dropout"],
+        #     batch_first=True
+        # )
 
     def forward(
         self,
         x: torch.Tensor,
         locs: torch.Tensor,
-        pos_embedding: torch.Tensor
+        pos_em: torch.Tensor,
+        periodic_em: torch.Tensor
     ):
         # x.shape == (batch_size, n_stations, seq_len, n_features)
         batch_size, n_stations, inseq_len, _ = x.shape
-        edge_weights, edge_ids = inverse_distance_weighting(locs)
-        pos_embedding = pos_embedding.repeat_interleave(n_stations, 0)
+        edge_weights, edge_ids = inverse_distance_weighting(locs, norm=True)
+        periodic_em = periodic_em.repeat_interleave(n_stations, 0)
+        pos_em = pos_em.repeat_interleave(n_stations, 0)
         gcn_outs = x.new_empty(batch_size, n_stations, inseq_len, self.gcn_dim)
-
-        for i in range(inseq_len):
-            gcn_outs[:, :, i] = torch.relu(self.graph_conv(x[:, :, i], edge_ids, edge_weights))
+        
+        for batch_idx in range(batch_size):
+            for seq_idx in range(inseq_len):
+                gcn_outs[batch_idx, :, seq_idx] = torch.relu(self.graph_conv(x[batch_idx, :, seq_idx], edge_ids[batch_idx], edge_weights[batch_idx]))
         gcn_outs = self.fc1(gcn_outs)
+    
+        gcn_outs = torch.cat((x, gcn_outs), dim=-1).view(-1, inseq_len, self.gcn_dim + self.n_features)
 
-        # gcn_outs = self.dropout(gcn_outs + pos_embedding)
-        gcn_outs = gcn_outs.view(-1, inseq_len, self.gcn_dim)
+        gcn_outs = self.dropout(gcn_outs + pos_em)
+        outs = self.transformer_enc(gcn_outs, periodic_em)
 
-        if isinstance(self.transformer_enc, nn.TransformerEncoderLayer):
-            gcn_outs = self.dropout(gcn_outs + pos_embedding)
-            outs = self.transformer_enc(gcn_outs)
-        else:
-            raise ValueError
-            outs = self.transformer_enc(gcn_outs, pos_embedding).view(batch_size, n_stations, inseq_len, self.gcn_dim)
-
-        outs = outs.view(batch_size, n_stations, inseq_len, self.gcn_dim)
+        outs = outs.view(batch_size, n_stations, inseq_len, self.gcn_dim + self.n_features)
         return outs
 
 
@@ -168,25 +90,21 @@ class TrafficTransformerDecoder(nn.Module):
         self.gcn_hidden_dim = config["gcn_hidden_dim"]
         self.num_attn_heads = config["num_attn_heads"]
 
-        self.pos_encoder = PositionalEmbedding(self.embedding_dim)
-        # self.graph_conv = GCN(self.n_features, self.gcn_dim, self.gcn_hidden_dim, config["dropout"])
-        self.graph_conv = GraphConv(self.n_features, self.gcn_dim)
+        self.graph_conv = GCNConv(self.n_features, self.gcn_dim)
         self.fc1 = nn.Linear(self.gcn_dim, self.gcn_dim)
-        self.dropout = nn.Dropout(p=config["dropout"])
-
-        # self.transformer_dec = TransformerDecoderLayer(
-        #     dmodel=self.gcn_dim,
+        self.dropout = nn.Dropout(config["dropout"])
+        # self.transformer_dec = nn.TransformerDecoderLayer(
+        #     d_model=self.gcn_dim + self.n_features,
         #     nhead=self.num_attn_heads,
-        #     expansion_factor=config["expansion_factor"],
-        #     dropout=config["dropout"]
+        #     dim_feedforward=self.gcn_dim * config["expansion_factor"],
+        #     dropout=config["dropout"],
+        #     batch_first=True
         # )
-
-        self.transformer_dec = nn.TransformerDecoderLayer(
-            d_model=self.gcn_dim,
+        self.transformer_dec = TransformerDecoderLayer(
+            dmodel=self.gcn_dim + self.n_features,
             nhead=self.num_attn_heads,
-            dim_feedforward=self.gcn_dim * config["expansion_factor"],
-            dropout=config["dropout"],
-            batch_first=True
+            expansion_factor=config["expansion_factor"],
+            dropout=config["dropout"]
         )
 
     def forward(
@@ -194,59 +112,39 @@ class TrafficTransformerDecoder(nn.Module):
         dec_in: torch.Tensor,
         enc_out: torch.Tensor,
         locs: torch.Tensor,
-        enc_pos_embedding: torch.Tensor,
-        dec_pos_embedding: torch.Tensor
+        dec_pos_em: torch.Tensor,
+        enc_periodic_em: torch.Tensor,
+        dec_periodic_em: torch.Tensor
     ):
         batch_size, n_tar_stations, outseq_len, _ = dec_in.shape
         n_src_stations, inseq_len = enc_out.size(1), enc_out.size(2)
 
-        enc_pos_embedding = enc_pos_embedding.repeat_interleave(n_src_stations, 0)
-        dec_pos_embedding = dec_pos_embedding.repeat_interleave(n_tar_stations, 0)
+        dec_periodic_em = dec_periodic_em.repeat_interleave(n_tar_stations, 0)
+        enc_periodic_em = enc_periodic_em.repeat_interleave(n_src_stations, 0)
+        dec_pos_em = dec_pos_em.repeat_interleave(n_tar_stations, 0)
 
-        edge_weights, edge_ids = inverse_distance_weighting(locs)
+        edge_weights, edge_ids = inverse_distance_weighting(locs, norm=True)
         gcn_outs = dec_in.new_empty(batch_size, n_tar_stations, outseq_len, self.gcn_dim)
 
-        for i in range(outseq_len):
-            gcn_outs[:, :, i] = torch.relu(self.graph_conv(dec_in[:, :, i], edge_ids, edge_weights))
+        for batch_idx in range(batch_size):
+            for seq_idx in range(outseq_len):
+                gcn_outs[batch_idx, :, seq_idx] = torch.relu(self.graph_conv(dec_in[batch_idx, :, seq_idx], edge_ids[batch_idx], edge_weights[batch_idx]))
         gcn_outs = self.fc1(gcn_outs)
 
-        # gcn_outs = self.dropout(gcn_outs + pos_embedding)
-        dec_in = gcn_outs.view(-1, outseq_len, self.gcn_dim)
-        enc_out = enc_out.view(-1, inseq_len, self.gcn_dim)
+        dec_in = torch.cat((dec_in, gcn_outs), dim=-1).view(-1, outseq_len, self.gcn_dim + self.n_features)
+        enc_out = enc_out.view(-1, inseq_len, self.gcn_dim + self.n_features)
 
-        if isinstance(self.transformer_dec, nn.TransformerDecoderLayer):
-            dec_in = self.dropout(dec_in + dec_pos_embedding)
-            outs = self.transformer_dec(dec_in, enc_out, tgt_mask=self._create_subsequent_mask(dec_in))
-        else:
-            raise ValueError
-            outs = self.transformer_dec(dec_in, enc_out, enc_pos_embedding, dec_pos_embedding)
-        outs = outs.view(batch_size, n_tar_stations, outseq_len, self.gcn_dim)
+        dec_in = self.dropout(dec_in + dec_pos_em)
+        outs = self.transformer_dec(dec_in, enc_out, enc_periodic_em, dec_periodic_em)
+        outs = outs.view(batch_size, n_tar_stations, outseq_len, self.gcn_dim + self.n_features)
         
         return outs
 
-    def _create_subsequent_mask(self, x: torch.Tensor):
-        batch_size, seq_len, _ = x.shape
+    # def _create_subsequent_mask(self, x: torch.Tensor):
+    #     batch_size, seq_len, _ = x.shape
 
-        # mask = torch.triu(-1 * torch.ones(
-        #     seq_len, seq_len, device=x.device, dtype=torch.int), diagonal=1) + 1
-        mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool), diagonal=1)
+    #     # mask = torch.triu(-1 * torch.ones(
+    #     #     seq_len, seq_len, device=x.device, dtype=torch.int), diagonal=1) + 1
+    #     mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool), diagonal=1)
 
-        return mask.unsqueeze(0).repeat_interleave(batch_size * self.num_attn_heads, 0)
-
-
-if __name__ == '__main__':
-    # pos_encoder = PositionalEncoding(512)
-
-    # pos_enc = pos_encoder(torch.arange(9999, 12345).unsqueeze(0))
-
-    # import matplotlib.pyplot as plt
-    # plt.figure(figsize=(20, 10))
-    # cax = plt.matshow(pos_enc[0], fignum=1, aspect="auto")
-    # fig = plt.gcf().colorbar(cax)
-    # plt.show()
-    self = GraphConv(64, 32)
-    x = torch.rand((1, 3, 64))
-
-    output = self(x, [torch.tensor([[0, 0, 1], [1, 2, 2]])], [torch.tensor([0.1, 0.2, 0.3])])
-
-    print(output.shape)
+    #     return mask.unsqueeze(0).repeat_interleave(batch_size * self.num_attn_heads, 0)

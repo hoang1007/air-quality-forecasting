@@ -42,7 +42,8 @@ class BaseAQFModel(LightningModule):
         for metric in metrics:
             metrics[metric] = sum(metrics[metric]) / len(metrics[metric])
 
-        self.log_dict(metrics)
+        # self.log_dict(metrics)
+        return metrics
 
     def configure_optimizers(self):
         if self.optim_config["optimizer"] == "sgd":
@@ -52,7 +53,7 @@ class BaseAQFModel(LightningModule):
                 momentum=self.optim_config.sgd.momentum,
                 weight_decay=self.optim_config.sgd["weight_decay"])
         else:
-            optimizer = torch.optim.Adam(
+            optimizer = torch.optim.AdamW(
                 self.parameters(),
                 lr=self.optim_config["lr"],
                 weight_decay=self.optim_config.adam["weight_decay"])

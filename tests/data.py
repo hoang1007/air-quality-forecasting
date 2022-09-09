@@ -3,13 +3,13 @@ from unittest import TestCase
 import torch
 import pandas as pd
 import math
-from dataset.raw_data import air_quality_train_data
+from dataset.raw_data import public_train_data
 from dataset import AirQualityDataset
 
 
 class DataTest(TestCase):
     def test_contiguous(self, data: AirQualityDataset):
-        raw = air_quality_train_data("/home/hoang/Documents/CodeSpace/air-quality-forecasting/data/data-train")
+        raw = public_train_data("/home/hoang/Documents/CodeSpace/air-quality-forecasting/data/data-train")
 
         pm25_col_idx = data.feature_cols.index("PM2.5")
         target_stations = [

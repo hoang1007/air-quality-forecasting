@@ -3,7 +3,16 @@ from os import path, scandir
 import pandas as pd
 
 
-def air_quality_train_data(rootdir: str):
+def private_train_data(rootdir: str):
+    loc_air = _read_locations(path.join(rootdir, "air/location.csv"))
+    loc_meteo = _read_locations(path.join(rootdir, "meteo/location.csv"))
+
+    return {
+        "air": _read_stations(path.join(rootdir, "air"), loc_air),
+        "meteo": _read_stations(path.join(rootdir, "meteo"), loc_meteo)
+    }
+
+def public_train_data(rootdir: str):
     '''
     Dict dữ liệu gồm `input` và `output`.
     Dữ liệu các trạm được lưu dưới dạng:
@@ -20,7 +29,7 @@ def air_quality_train_data(rootdir: str):
         "output": _read_stations(path.join(rootdir, "output"), loc_output),
     }
 
-def air_quality_test_data(testdir: str, traindir: str):
+def public_test_data(testdir: str, traindir: str):
     '''
     Dict dữ liệu gồm `input`, `loc_output`, `folder_name`.
     

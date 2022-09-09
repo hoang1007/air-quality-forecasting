@@ -15,9 +15,9 @@ def inverse_distance_weighting(loc1: torch.Tensor, loc2: torch.Tensor = None, be
         """
 
         if loc2 is None:
-            return _self_weighting(loc1, beta=beta)
+            return _self_weighting(loc1, beta=beta, norm=norm)
         else:
-            return _pairwise_weighting(loc1, loc2, beta=beta)
+            return _pairwise_weighting(loc1, loc2, beta=beta, norm=norm)
         
 
 def _self_weighting(locs: torch.Tensor, beta: float = 1, norm: bool = True):

@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from pytorch_lightning import LightningDataModule
 from datetime import datetime
-from .raw_data import air_quality_train_data, air_quality_test_data
+from .raw_data import public_train_data, public_test_data
 from utils.functional import get_solar_term, get_next_period
 
 def default_fillnan_fn(x: pd.Series):
@@ -67,13 +67,13 @@ class AirQualityDataset2(Dataset):
         self.std_ = normalize_std
 
         if data_set == "train":
-            self.data = air_quality_train_data(
+            self.data = public_train_data(
                 path.join(rootdir, "data-train")
             )
 
             self._prev_fill_nan()
         elif data_set == "test":
-            self.data = air_quality_test_data(
+            self.data = public_test_data(
                 path.join(rootdir, "public-test"),
                 path.join(rootdir, "data-train")
             )
@@ -101,11 +101,12 @@ class AirQualityDataset2(Dataset):
         time = None
 
         in_start_idx = idx * self.outseq_len
-        out_end_idx = in_start_idx + self.outseq_len + self.inseq_len
+        out_end_idx = in_start_idx + self.inseq_len + self.outseq_len
 
         for station in self.data["input"].values():
             df = station["data"].iloc[in_start_idx : out_end_idx].copy()
-
+            
+            target = self._metero_to_tensor(df[self.inseq_len:]["PM2.5"], usecols=["PM2.5"], norm=False)
             metero = self._metero_to_tensor(df, norm=True)
 
             if time is None:
@@ -113,7 +114,7 @@ class AirQualityDataset2(Dataset):
 
             inputs.append(metero[:self.inseq_len])
             in_locs.append(torch.tensor(station["loc"], dtype=torch.float))
-            metero_next.append(metero[self.inseq_len - 1 : self.inseq_len + self.outseq_len - 1])
+            metero_next.append(metero[self.inseq_len:])
 
         # targets = []
         # tar_locs = []
@@ -130,6 +131,7 @@ class AirQualityDataset2(Dataset):
             "time": time,
             "metero_next": torch.stack(metero_next, dim=0),
             "src_locs": torch.stack(in_locs, dim=0),
+            "target": torch.stack(target, dim=0)
             # "targets": torch.stack(targets, dim=0),
             # "tar_locs": torch.stack(tar_locs, dim=0),
         }
@@ -193,6 +195,7 @@ class AirQualityDataset2(Dataset):
         time = {
             "timestamp": [],
             "weekday": [],
+            "hour": []
         }
 
         for date in df["timestamp"]:
@@ -200,6 +203,7 @@ class AirQualityDataset2(Dataset):
 
             interval = (date - self.pivot).total_seconds() // 3600
             time["weekday"].append(date.isoweekday())
+            time["hour"].append(date.hour)
             time["timestamp"].append(interval)
 
         for k in time:

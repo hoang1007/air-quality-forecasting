@@ -4,7 +4,7 @@ training:
 
   n_features: 3
   pos_embedding_dim: 32
-  gcn_dim: 32
+  gcn_dim: 29
   gcn_hidden_dim: 64
   expansion_factor: 3
   num_attn_heads: 8
@@ -22,7 +22,7 @@ training:
       weight_decay: 0.001
     scheduler: "steplr"
     steplr:
-      step_size: 15
+      step_size: 20
     plateau:
       patience: 5
       eps: 0.0000001 # 1e-7

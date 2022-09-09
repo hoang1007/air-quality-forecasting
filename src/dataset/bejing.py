@@ -4,7 +4,7 @@ from datetime import datetime
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from pytorch_lightning import LightningDataModule
-from .raw_data import air_quality_train_data
+from .raw_data import public_train_data
 from utils.functional import get_solar_term
 
 
@@ -45,7 +45,7 @@ class BejingDataset(Dataset):
         self.inseq_len = 24 * 7
         self.outseq_len = 24
         self.metero_cols = ["PM2.5", "PM10", "SO2", "NO2", "CO", "O3", "TEMP", "PRES", "DEWP", "RAIN", "WSPM"]
-        self.data = air_quality_train_data(rootdir)["input"]
+        self.data = public_train_data(rootdir)["input"]
 
         self.mean_, self.std_ = self._preprocess_data()
 
