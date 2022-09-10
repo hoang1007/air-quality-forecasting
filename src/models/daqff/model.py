@@ -19,16 +19,17 @@ class DAQFFModel(BaseAQFModel):
         super().__init__(config, target_normalize_mean, target_normalize_std)
 
         self.ff_size = config["ff_size"]
-        self.time_embedding_dim = 16
-        self.loc_embedding_dim = 12
-        self.n_features = config["n_features"] + 3 * self.time_embedding_dim + self.loc_embedding_dim
+        self.n_features = config["n_features"]
+        # self.time_embedding_dim = 16
+        # self.loc_embedding_dim = 12
+        # self.n_features = config["n_features"] + 3 * self.time_embedding_dim + self.loc_embedding_dim
 
-        self.loc_embedding = nn.Linear(2, self.loc_embedding_dim)
-        self.hour_embedding = nn.Embedding(24, self.time_embedding_dim)
-        self.solar_term_embedding = nn.Embedding(24, self.time_embedding_dim)
-        self.weekday_embedding = nn.Embedding(31, self.time_embedding_dim)
+        # self.loc_embedding = nn.Linear(2, self.loc_embedding_dim)
+        # self.hour_embedding = nn.Embedding(24, self.time_embedding_dim)
+        # self.solar_term_embedding = nn.Embedding(24, self.time_embedding_dim)
+        # self.weekday_embedding = nn.Embedding(31, self.time_embedding_dim)
 
-        self.loc_norm = nn.BatchNorm1d(self.loc_embedding_dim)
+        # self.loc_norm = nn.BatchNorm1d(self.loc_embedding_dim)
 
         self.extractor = Conv1dExtractor(config, self.n_features)
         self.st_layer = SpatialTemporalLayer(config, config["n_stations"])
@@ -38,9 +39,10 @@ class DAQFFModel(BaseAQFModel):
 
     def forward(
         self,
-        x: torch.Tensor,
-        src_locs: torch.Tensor,
-        time: Dict[str, torch.Tensor],
+        air: torch.Tensor,
+        meteo: torch.Tensor,
+        air_locs: torch.Tensor,
+
     ):
         batch_size, n_stations = x.size(0), x.size(1)
 
@@ -67,16 +69,16 @@ class DAQFFModel(BaseAQFModel):
 
         return outs * self.target_normalize_std + self.target_normalize_mean
 
-    def time_embedding(self, time: Dict[str, torch.Tensor]):
-        # shape (batch_size, seq_len)
-        hour_embed = self.hour_embedding(time["hour"])
-        weekday_embed = self.weekday_embedding(time["weekday"] - 1)
-        # month_embed = self.month_embedding(time["month"] - 1)
-        solar_term_embed = self.solar_term_embedding(time["solar_term"])
+    # def time_embedding(self, time: Dict[str, torch.Tensor]):
+    #     # shape (batch_size, seq_len)
+    #     hour_embed = self.hour_embedding(time["hour"])
+    #     weekday_embed = self.weekday_embedding(time["weekday"] - 1)
+    #     # month_embed = self.month_embedding(time["month"] - 1)
+    #     solar_term_embed = self.solar_term_embedding(time["solar_term"])
 
-        time_embed = torch.cat((hour_embed, weekday_embed, solar_term_embed), dim=-1)
+    #     time_embed = torch.cat((hour_embed, weekday_embed, solar_term_embed), dim=-1)
 
-        return time_embed
+    #     return time_embed
 
     def compute_loss(self, input: torch.Tensor, target: torch.Tensor, reduction: str = "mean"):
         loss = F.l1_loss(input, target, reduction=reduction)

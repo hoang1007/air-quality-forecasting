@@ -1,32 +1,43 @@
 training:
   batch_size: 8
-  n_features: 7 # humidity, temperature...
-  n_sequence: 168 # chiều dài timesteps đầu vào
-  output_dim: 24 # chiều dài dự đoán
+  num_air_features: 3 # humidity, temperature...
+  num_meteo_features: 2
+  
+  outseq_len: 24
   src_len: 11 # số trạm đã biết
-  num_enc_layers: 1 # số encoder layer của LSTMAutoEncoder
-  num_dec_layers: 1 # số decoder layer của LSTMAutoEncoder
-  hidden_size_autoencoder: 128 # hidden_size của LSTMAutoEncoder
-  num_extractor_layers: 2
-  extractor_size: 512
-  attn_ff_dim: 128
+  
+  hidden_size: 16
+  num_extractor_layers: 1
+  gcn_dim: 32
+  dropout: 0.2
+
   optim:
     lr: 0.001
+    optimizer: "adam"
+    sgd:
+      momentum: 0.9
+      weight_decay: 0.001
+    adam:
+      weight_decay: 0.001
     scheduler: "plateau"
     steplr:
-      step_size: 50
+      step_size: 20
     plateau:
-      patience: 10
+      patience: 4
       eps: 0.0000001 # 1e-7
-      monitor: "mdape"
+      monitor: "mae"
 
 
 data:
   normalize_mean:
-    temperature: 26.55
-    humidity: 75.77
-    PM2.5: 45.06
+    temperature: 27.133
+    humidity: 79.378
+    PM2.5: 48.219
+    wind_speed: 2.332
+    surface_pressure: 96957.127
   normalize_std:
-    temperature: 5.94
-    humidity: 15.43
-    PM2.5: 42.23
+    temperature: 6.098
+    humidity: 16.169
+    PM2.5: 55.535
+    wind_speed: 1.9
+    surface_pressure: 4101.496

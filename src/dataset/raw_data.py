@@ -80,6 +80,6 @@ def _read_locations(filepath: str) -> Dict[str, Tuple[float, float]]:
     df = pd.read_csv(filepath)
 
     return dict(zip(
-        df["station"],
+        df["location"],
         zip(df["longitude"], df["latitude"])
     ))

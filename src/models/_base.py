@@ -42,8 +42,8 @@ class BaseAQFModel(LightningModule):
         for metric in metrics:
             metrics[metric] = sum(metrics[metric]) / len(metrics[metric])
 
-        # self.log_dict(metrics)
-        return metrics
+        self.log_dict(metrics)
+        # return metrics
 
     def configure_optimizers(self):
         if self.optim_config["optimizer"] == "sgd":

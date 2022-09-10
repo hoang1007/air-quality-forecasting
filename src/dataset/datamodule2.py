@@ -98,6 +98,7 @@ class AirQualityDataset2(Dataset):
         inputs = []
         in_locs = []
         metero_next = []
+        targets = []
         time = None
 
         in_start_idx = idx * self.outseq_len
@@ -106,7 +107,7 @@ class AirQualityDataset2(Dataset):
         for station in self.data["input"].values():
             df = station["data"].iloc[in_start_idx : out_end_idx].copy()
             
-            target = self._metero_to_tensor(df[self.inseq_len:]["PM2.5"], usecols=["PM2.5"], norm=False)
+            target = self._metero_to_tensor(df[self.inseq_len:], usecols=["PM2.5"], norm=False).squeeze(-1)
             metero = self._metero_to_tensor(df, norm=True)
 
             if time is None:
@@ -115,6 +116,7 @@ class AirQualityDataset2(Dataset):
             inputs.append(metero[:self.inseq_len])
             in_locs.append(torch.tensor(station["loc"], dtype=torch.float))
             metero_next.append(metero[self.inseq_len:])
+            targets.append(target)
 
         # targets = []
         # tar_locs = []
@@ -131,7 +133,7 @@ class AirQualityDataset2(Dataset):
             "time": time,
             "metero_next": torch.stack(metero_next, dim=0),
             "src_locs": torch.stack(in_locs, dim=0),
-            "target": torch.stack(target, dim=0)
+            "targets": torch.stack(targets, dim=0)
             # "targets": torch.stack(targets, dim=0),
             # "tar_locs": torch.stack(tar_locs, dim=0),
         }

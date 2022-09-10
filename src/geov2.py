@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 
 with initialize(version_base=None, config_path="../config/model"):
-    cfg = compose(config_name="traffic-transformer.yaml")
+    cfg = compose(config_name="aqf.yaml")
 
 ROOTDIR = os.getcwd()
 DATADIR = os.path.join(ROOTDIR, "data")
@@ -19,13 +19,13 @@ LOGDIR = os.path.join(ROOTDIR, "logs")
 EXPORT_DIR = os.path.join(ROOTDIR, "submit")
 
 pl.seed_everything(3107)
-model = TrafficTransformer(
+model = AQFModel(
     cfg.training, cfg.data.normalize_mean["PM2.5"], cfg.data.normalize_std["PM2.5"])
 
 
 def train(n_epochs: int, batch_size: int):
-    dtm = AirQualityDataModule2(
-        "./data-full",
+    dtm = PrivateDataModule(
+        "./data-private",
         # normalize_mean={"humidity":0, "temperature": 0, "PM2.5": 0},
         # normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
         normalize_mean=cfg.data.normalize_mean,
@@ -34,9 +34,9 @@ def train(n_epochs: int, batch_size: int):
         batch_size=batch_size
     )
 
-    ckpt = ModelCheckpoint(CKPT_DIR, filename="ttf", monitor="mae")
+    ckpt = ModelCheckpoint(CKPT_DIR, filename="aqf", monitor="mae")
     lr_monitor = LearningRateMonitor("epoch")
-    logger = TensorBoardLogger(LOGDIR, name="ttf", version="gcn", default_hp_metric=False)
+    logger = TensorBoardLogger(LOGDIR, name="aqf", version="nearest", default_hp_metric=False)
     trainer = pl.Trainer(
         logger=logger,
         max_epochs=n_epochs,
@@ -50,33 +50,40 @@ def train(n_epochs: int, batch_size: int):
     # lr_finder.plot(suggest=True)
 
 def test():
-    st = torch.load("ckpt/ttf-v1.ckpt", map_location="cpu")["state_dict"]
+    st = torch.load("ckpt/aqf-v1.ckpt")["state_dict"]
     model.load_state_dict(st)
-    dts = AirQualityDataset2(
-        "data-full",
+    dtm = PrivateDataModule(
+        "./data-private",
         # normalize_mean={"humidity":0, "temperature": 0, "PM2.5": 0},
         # normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
         normalize_mean=cfg.data.normalize_mean,
         normalize_std=cfg.data.normalize_std,
-        # split_stations=(12, 3),
-        data_set="train"
+        train_ratio=0.75,
+        batch_size=1
     )
-    
-    model.is_predict = True
-    pred, target = model.predict(dts[1])
 
-    fig, axes = plt.subplots(4, 3, figsize=(20, 20), dpi=100)
+    dtm.setup()
+    
+    dt = dtm.data_val[10]
+    pred = model.predict(dt)
+    target = dt["targets"]
+
+    fig, axes = plt.subplots(10, 7, figsize=(20, 20), dpi=100)
     plt.tight_layout()
 
-    for i in range(target.size(0)):
-        row_idx = i // 3
-        col_idx = i % 3
+    for i in range(70):
+        row_idx = i // 7
+        col_idx = i % 7
         ax = axes[row_idx, col_idx]
 
         ax.plot(pred[i].cpu())
         ax.plot(target[i].cpu())
         ax.legend(["Predicted", "Actual"])
     plt.show()
+
+    # for i in range(pred.size(0)):
+    #     plt.plot(pred[i].cpu())
+    # plt.show()
 
     # model.is_predict = True
     # model.eval()
@@ -99,5 +106,5 @@ def test():
 
 if __name__ == "__main__":
     torch.cuda.empty_cache()
-    train(20, 8)
-    # test()
+    # train(20, 8)
+    test()
