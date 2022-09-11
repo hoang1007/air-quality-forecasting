@@ -4,18 +4,31 @@
 
     - Các config và chạy train, test được mô tả trong file config/config.yaml
     - Chỉnh sửa các config của model ở trong folder config/model
-    - Model daqff có số lượng tham số nhỏ hơn daqff-large (model được sử dụng để submit)
+    - Sau khi chạy xong test có thể tải folder `submit` trong volume
 
+## Build docker image
+```bash
+docker build -t airqualityforecasting .
+```
+
+## Khởi tạo volume
+    docker volume create hblh
+
+## Chuẩn bị dữ liệu
+> **_NOTE:_** Chỉ cần chạy lần đầu tiên để giải nén dữ liệu vào volume
+```bash
+docker run -v hblh:/app --rm airqualityforecasting mode=makedata
+```
 ## Train
 
 > Chạy full config
 ```bash
-docker run --rm airqualityforecasting ++mode=train ++device=cpu model=daqff-large
+docker run -v hblh:/app --rm airqualityforecasting mode=train device=cpu
 ```
 
 > Chạy với config có sẵn trong config.yaml
 ```
-docker run --rm airqualityforecasting
+docker run -v hblh:/app --rm airqualityforecasting
 ```
 > Chỉnh sửa config trong config.yaml
 
@@ -23,7 +36,7 @@ docker run --rm airqualityforecasting
 ## Test
 > Command line
 ```bash
-docker run --rm airqualityforecasting ++mode=test
+docker run -v hblh:/app --rm airqualityforecasting ++mode=test
 ```
 
 > Chỉnh sửa config:

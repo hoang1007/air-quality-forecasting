@@ -7,9 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Turns off buffering for easier container logging
 ENV PYTHONUNBUFFERED=1
 
-# Install pip requirements
+# Install requirements
+RUN apt-get update && apt-get -y install g++
+RUN pip install --upgrade pip
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+COPY core-requirements.txt .
+RUN pip install --no-cache-dir -r core-requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 WORKDIR /app
 COPY . /app

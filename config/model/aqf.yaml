@@ -1,8 +1,8 @@
 training:
-  batch_size: 8
-  epochs: 20
   num_air_features: 3 # humidity, temperature...
   num_meteo_features: 4
+  batch_size: 8
+  epochs: 20
   
   outseq_len: 24
   src_len: 11 # số trạm đã biết
