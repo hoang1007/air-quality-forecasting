@@ -14,7 +14,6 @@ submit/
 ckpt/
 
 # Data
-data-private/
 data-full/
 
 # C extensions
