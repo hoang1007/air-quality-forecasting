@@ -1,6 +1,7 @@
 torch
 pytorch-lightning
 torch-scatter
+torch-geometric
 matplotlib
 numpy
 pandas

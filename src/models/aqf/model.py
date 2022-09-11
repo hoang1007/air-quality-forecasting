@@ -31,13 +31,13 @@ class AQFModel(BaseAQFModel):
         )
 
         self.gconv1 = GraphConv(
-            (config["hidden_size"] * 2 + self.loc_dim, self.loc_dim),
+            (config["hidden_size"] * 2, self.loc_dim),
             config["gcn_dim"],
             aggr="mean"
         )
 
         self.gconv2 = GraphConv(
-            (config["hidden_size"] * 2 + self.loc_dim, self.loc_dim),
+            (config["hidden_size"] * 2, self.loc_dim),
             config["gcn_dim"],
             aggr="mean"
         )
@@ -77,14 +77,10 @@ class AQFModel(BaseAQFModel):
         meteo, _ = self.meteo_extractor(meteo)
         meteo = meteo[:, -1].view(batch_size, num_meteo_nodes, -1)
 
-        new_air = torch.cat((air, self._forward_loc_em(air_locs)), dim=-1)
-        new_meteo = torch.cat((meteo, self._forward_loc_em(meteo_locs)), dim=-1)
+        tar_loc_embed = self._forward_loc_em(tar_locs)
 
-        with torch.no_grad():
-            tar_loc_embed = self._forward_loc_em(tar_locs)
-
-        gconv1_out = self._forward_gconv1(new_air, tar_loc_embed, air_locs, tar_locs)
-        gconv2_out = self._forward_gconv2(new_meteo, tar_loc_embed, meteo_locs, tar_locs)
+        gconv1_out = self._forward_gconv1(air, tar_loc_embed, air_locs, tar_locs)
+        gconv2_out = self._forward_gconv2(meteo, tar_loc_embed, meteo_locs, tar_locs)
 
         # gconv_out.shape == (batch_size, num_air_nodes, 2 * gcn_dim)
         gconv_out = torch.cat((gconv1_out, gconv2_out), dim=-1)
@@ -95,6 +91,7 @@ class AQFModel(BaseAQFModel):
     
     def _forward_loc_em(self, locs: torch.Tensor):
         # (tensor([105.7804,  21.0309]), tensor([0.1088, 0.0793]))
+        # pre-computed
         loc_mean_ = locs.new_tensor([105.7804,  21.0309])
         loc_std_ = locs.new_tensor([0.1088, 0.0793])
 

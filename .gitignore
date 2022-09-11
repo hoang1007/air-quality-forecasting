@@ -14,7 +14,7 @@ submit/
 ckpt/
 
 # Data
-data-full/
+private-data/
 
 # C extensions
 *.so
