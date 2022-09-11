@@ -12,6 +12,25 @@ def private_train_data(rootdir: str):
         "meteo": _read_stations(path.join(rootdir, "meteo"), loc_meteo)
     }
 
+def private_test_data(rootdir: str):
+    items = []
+    for folder_name in scandir(rootdir):
+        if path.isdir(folder_name):
+            dirpath = folder_name.path
+
+            loc_air = _read_locations(path.join(dirpath, "location_input.csv"))
+            loc_meteo = _read_locations(path.join(dirpath, "meteo/location_meteorology.csv"))
+            loc_output = _read_locations(path.join(dirpath, "location_output.csv"))
+        
+            items.append({
+                "air": _read_stations(dirpath, loc_air),
+                "meteo": _read_stations(path.join(dirpath, "meteo"), loc_meteo),
+                "loc_output": loc_output,
+                "folder_name": folder_name.name
+            })
+    
+    return items
+
 def public_train_data(rootdir: str):
     '''
     Dict dữ liệu gồm `input` và `output`.
@@ -79,7 +98,13 @@ def _read_stations(
 def _read_locations(filepath: str) -> Dict[str, Tuple[float, float]]:
     df = pd.read_csv(filepath)
 
-    return dict(zip(
-        df["location"],
-        zip(df["longitude"], df["latitude"])
-    ))
+    try:
+        return dict(zip(
+            df["location"],
+            zip(df["longitude"], df["latitude"])
+        ))
+    except: # meteorology format
+        return dict(zip(
+            df["stat_name"],
+            zip(df["lon"], df["lat"])
+        ))

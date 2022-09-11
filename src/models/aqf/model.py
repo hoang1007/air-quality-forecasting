@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, GraphConv
+from torch_geometric.nn import GraphConv, GATv2Conv
 from models import BaseAQFModel
 from .utils import inverse_distance_weighting
 
@@ -9,6 +9,8 @@ from .utils import inverse_distance_weighting
 class AQFModel(BaseAQFModel):
     def __init__(self, config, target_normalize_mean: float, target_normalize_std: float):
         super().__init__(config, target_normalize_mean, target_normalize_std)
+
+        self.loc_dim = 12
 
         self.air_extractor = nn.GRU(
             input_size=config["num_air_features"],
@@ -28,13 +30,16 @@ class AQFModel(BaseAQFModel):
             bidirectional=True
         )
 
-        self.gconv1 = GCNConv(
-            config["hidden_size"] * 2,
-            config["gcn_dim"]
+        # self.loc_embedding = nn.Linear(2, 32)
+
+        self.gconv1 = GraphConv(
+            (config["hidden_size"] * 2, 2),
+            config["gcn_dim"],
+            aggr="mean"
         )
 
         self.gconv2 = GraphConv(
-            (config["hidden_size"] * 2, config["hidden_size"] * 2),
+            (config["hidden_size"] * 2, 2),
             config["gcn_dim"],
             aggr="mean"
         )
@@ -50,7 +55,8 @@ class AQFModel(BaseAQFModel):
         air: torch.Tensor,
         meteo: torch.Tensor,
         air_locs: torch.Tensor,
-        meteo_locs: torch.Tensor
+        meteo_locs: torch.Tensor,
+        tar_locs: torch.Tensor
     ):
         """
         Args:
@@ -73,8 +79,13 @@ class AQFModel(BaseAQFModel):
         meteo, _ = self.meteo_extractor(meteo)
         meteo = meteo[:, -1].view(batch_size, num_meteo_nodes, -1)
 
-        gconv1_out = self._forward_gconv1(air, air_locs)
-        gconv2_out = self._forward_gconv2(air, meteo, air_locs, meteo_locs)
+        # (tensor([105.7804,  21.0309]), tensor([0.1088, 0.0793]))
+        loc_mean_ = tar_locs.new_tensor([105.7804,  21.0309])
+        loc_std_ = tar_locs.new_tensor([0.1088, 0.0793])
+        tar_loc_embed = (tar_locs - loc_mean_) / loc_std_
+
+        gconv1_out = self._forward_gconv1(air, tar_loc_embed, air_locs, tar_locs)
+        gconv2_out = self._forward_gconv2(meteo, tar_loc_embed, meteo_locs, tar_locs)
 
         # gconv_out.shape == (batch_size, num_air_nodes, 2 * gcn_dim)
         gconv_out = torch.cat((gconv1_out, gconv2_out), dim=-1)
@@ -83,23 +94,27 @@ class AQFModel(BaseAQFModel):
 
         return pred
 
-    def _forward_gconv1(self, x: torch.Tensor, locs: torch.Tensor):
-        edge_weights, edge_ids = inverse_distance_weighting(locs, dist_thresh=0.3)
-
+    def _forward_gconv1(self, src_x: torch.Tensor, tar_x: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
         out = []
-        for batch_idx in range(x.size(0)):
-            temp = self.gconv1(x[batch_idx], edge_ids, edge_weights)
+        for batch_idx in range(src_x.size(0)):
+            edge_weights, edge_ids = inverse_distance_weighting(
+                src_locs[batch_idx], tar_locs[batch_idx], dist_thresh=0.3, norm=False)
+
+            temp = self.gconv1(
+                (src_x[batch_idx], tar_x[batch_idx]), edge_ids, edge_weights)
 
             out.append(temp)
 
         return torch.stack(out, dim=0)
 
-    def _forward_gconv2(self, air: torch.Tensor, meteo: torch.Tensor, air_locs: torch.Tensor, meteo_locs: torch.Tensor):
-        edge_weights, edge_ids = inverse_distance_weighting(meteo_locs, air_locs, dist_thresh=0.8)
-
+    def _forward_gconv2(self, src_x: torch.Tensor, tar_x: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
         out = []
-        for batch_idx in range(air.size(0)):
-            temp = self.gconv2((meteo[batch_idx], air[batch_idx]), edge_ids, edge_weights)
+        for batch_idx in range(src_x.size(0)):
+            edge_weights, edge_ids = inverse_distance_weighting(
+                src_locs[batch_idx], tar_locs[batch_idx], dist_thresh=0.8, norm=False)
+
+            temp = self.gconv2(
+                (src_x[batch_idx], tar_x[batch_idx]), edge_ids, edge_weights)
 
             out.append(temp)
 
@@ -109,15 +124,18 @@ class AQFModel(BaseAQFModel):
         return F.l1_loss(input, target)
 
     def training_step(self, batch, batch_idx):
-        pred = self(batch["air"], batch["meteo"], batch["air_locs"][0], batch["meteo_locs"][0])
+        pred = self(batch["air"], batch["meteo"],
+                    batch["air_locs"], batch["meteo_locs"], batch["tar_locs"])
 
-        target = (batch["targets"] - self.target_normalize_mean) / self.target_normalize_std
+        target = (batch["targets"] - self.target_normalize_mean) / \
+            self.target_normalize_std
         loss = self.compute_loss(pred, target)
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pred = self(batch["air"], batch["meteo"], batch["air_locs"][0], batch["meteo_locs"][0])
+        pred = self(batch["air"], batch["meteo"],
+                    batch["air_locs"], batch["meteo_locs"], batch["tar_locs"])
 
         pred = pred * self.target_normalize_std + self.target_normalize_mean
         return self.metric_fns(pred, batch["targets"])
@@ -128,10 +146,11 @@ class AQFModel(BaseAQFModel):
         with torch.no_grad():
             air = dt["air"].to(self.device).unsqueeze(0)
             meteo = dt["meteo"].to(self.device).unsqueeze(0)
-            air_locs = dt["air_locs"].to(self.device)
-            meteo_locs = dt["meteo_locs"].to(self.device)
+            air_locs = dt["air_locs"].to(self.device).unsqueeze(0)
+            meteo_locs = dt["meteo_locs"].to(self.device).unsqueeze(0)
+            tar_locs = dt["tar_locs"].to(self.device).unsqueeze(0)
 
-            preds = self(air, meteo, air_locs, meteo_locs).squeeze(0)
+            preds = self(air, meteo, air_locs, meteo_locs, tar_locs).squeeze(0)
             preds = preds * self.target_normalize_std + self.target_normalize_mean
         self.train(st)
 

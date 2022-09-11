@@ -1,11 +1,12 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from os import path
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader
 from pytorch_lightning import LightningDataModule
-from .raw_data import private_train_data
+from .raw_data import private_train_data, private_test_data
 from utils.functional import extract_wind
+from utils.export import batch_export
 
 
 class PrivateDataModule(LightningDataModule):
@@ -25,12 +26,31 @@ class PrivateDataModule(LightningDataModule):
         self.train_ratio = train_ratio
 
     def setup(self, stage: Optional[str] = None) -> None:
-        datafull = PrivateDataset(self.rootdir, self.normalize_mean, self.normalize_std)
+        split_ids = self._split_train_val(self.train_ratio)
 
-        train_size = int(len(datafull) * self.train_ratio)
-        val_size = len(datafull) - train_size
+        self.data_train = PrivateDataset(
+            self.rootdir,
+            self.normalize_mean,
+            self.normalize_std,
+            split_ids=split_ids,
+            data_set="train"
+        )
 
-        self.data_train, self.data_val = random_split(datafull, [train_size, val_size])
+        self.data_val = PrivateDataset(
+            self.rootdir,
+            self.normalize_mean,
+            self.normalize_std,
+            split_ids=split_ids,
+            data_set="val"
+        )
+
+    def _split_train_val(self, train_ratio: float):
+        total_len = 243
+        train_size = int(total_len * train_ratio)
+
+        perm_ids = torch.randperm(total_len)
+
+        return perm_ids[:train_size], perm_ids[train_size:]
 
     def train_dataloader(self):
         return DataLoader(self.data_train, batch_size=self.batch_size, shuffle=True, num_workers=2)
@@ -45,30 +65,38 @@ class PrivateDataset(Dataset):
         rootdir: str,
         normalize_mean: Dict[str, float],
         normalize_std: Dict[str, float],
-        data_set: str = "train"
+        split_ids: Tuple[torch.Tensor, torch.Tensor],
+        data_set: str = "train",
     ):
         self.mean_ = normalize_mean
         self.std_ = normalize_std
         self.data_set = data_set
         self.inseq_len = 168
         self.outseq_len = 24
+        self.num_val_stations = 10
+        self.num_train_stations = 61
 
-        if data_set == "train":
-            self.data = private_train_data(path.join(rootdir, "data-train"))
+        if data_set in ("train", "val"):
+            self.data = private_train_data(path.join(rootdir, "train"))
+            self.train_ids, self.val_ids = split_ids
         elif data_set == "test":
-            raise NotImplementedError
+            self.data = private_test_data(path.join(rootdir, "test"))
 
     def __len__(self):
         if self.data_set == "train":
-            return 243
+            return self.train_ids.numel()
+        elif self.data_set == "val":
+            return self.val_ids.numel()
         else:
-            raise NotImplementedError
+            return 89
     
     def __getitem__(self, idx):
         if self.data_set == "train":
-            return self._get_training_item(idx)
+            return self._get_training_item(self.train_ids[idx].item())
+        elif self.data_set == "val":
+            return self._get_training_item(self.val_ids[idx].item())
         else:
-            raise NotImplementedError
+            return self._get_testing_item(idx)
 
     def _get_training_item(self, idx):
         in_air_ = []
@@ -103,11 +131,19 @@ class PrivateDataset(Dataset):
 
             meteo_locs_.append(station["loc"])
 
+        # thông tin của 71 trạm air và 143 trạm meteo
         in_air_ = torch.stack(in_air_, dim=0)
         in_meteo_ = torch.stack(in_meteo_, dim=0)
         air_locs_ = torch.tensor(air_locs_)
         meteo_locs_ = torch.tensor(meteo_locs_)
         targets_ = torch.stack(targets_, dim=0)
+
+        # chia thành trạm nguồn và đích để train
+        src_ids, tar_ids = self._split_stations()
+        in_air_ = in_air_[src_ids]
+        tar_locs_ = air_locs_[tar_ids]
+        air_locs_ = air_locs_[src_ids]
+        targets_ = targets_[tar_ids]
 
         return {
             "air": in_air_,
@@ -115,7 +151,54 @@ class PrivateDataset(Dataset):
             "air_locs": air_locs_,
             "meteo_locs": meteo_locs_,
             "targets": targets_,
+            "tar_locs": tar_locs_
         }
+
+    def _get_testing_item(self, idx):
+        item = self.data[idx]
+
+        air_ = []
+        meteo_ = []
+        air_locs_ = []
+        meteo_locs_ = []
+
+        for station in item["air"].values():
+            tmp_air = self._air_to_tensor(station["data"])
+            air_locs_.append(station["loc"])
+            air_.append(tmp_air)
+
+        for station in item["meteo"].values():
+            tmp_meteo = self._meteo_to_tensor(station["data"])
+            meteo_locs_.append(station["loc"])
+            meteo_.append(tmp_meteo)
+
+        air_ = torch.stack(air_, dim=0)
+        meteo_ = torch.stack(meteo_, dim=0)
+        air_locs_ = torch.tensor(air_locs_)
+        meteo_locs_ = torch.tensor(meteo_locs_)
+        out_locs_ = torch.tensor(list(item["loc_output"].values()))
+
+        return {
+            "air": air_,
+            "meteo": meteo_,
+            "air_locs": air_locs_,
+            "meteo_locs": meteo_locs_,
+            "tar_locs": out_locs_,
+            "folder_name": item["folder_name"]
+        }
+
+    def _split_stations(self):
+        if self.data_set == "train":
+            perm_ids = torch.randperm(self.num_train_stations)
+            num_src_stations = self.num_train_stations - 10
+
+            return perm_ids[:num_src_stations], perm_ids[num_src_stations:]
+        elif self.data_set == "val":
+            ids = torch.arange(self.num_train_stations + self.num_val_stations)
+
+            return ids[:self.num_train_stations], ids[self.num_train_stations:]
+        else:
+            raise NotImplementedError
     
     def _air_to_tensor(
         self,

@@ -23,7 +23,7 @@ training:
     steplr:
       step_size: 20
     plateau:
-      patience: 4
+      patience: 2
       eps: 0.0000001 # 1e-7
       monitor: "mae"
 
