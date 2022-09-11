@@ -10,7 +10,7 @@ class AQFModel(BaseAQFModel):
     def __init__(self, config, target_normalize_mean: float, target_normalize_std: float):
         super().__init__(config, target_normalize_mean, target_normalize_std)
 
-        self.loc_dim = 12
+        self.loc_dim = 2
 
         self.air_extractor = nn.GRU(
             input_size=config["num_air_features"],
@@ -30,16 +30,14 @@ class AQFModel(BaseAQFModel):
             bidirectional=True
         )
 
-        # self.loc_embedding = nn.Linear(2, 32)
-
         self.gconv1 = GraphConv(
-            (config["hidden_size"] * 2, 2),
+            (config["hidden_size"] * 2 + self.loc_dim, self.loc_dim),
             config["gcn_dim"],
             aggr="mean"
         )
 
         self.gconv2 = GraphConv(
-            (config["hidden_size"] * 2, 2),
+            (config["hidden_size"] * 2 + self.loc_dim, self.loc_dim),
             config["gcn_dim"],
             aggr="mean"
         )
@@ -79,13 +77,14 @@ class AQFModel(BaseAQFModel):
         meteo, _ = self.meteo_extractor(meteo)
         meteo = meteo[:, -1].view(batch_size, num_meteo_nodes, -1)
 
-        # (tensor([105.7804,  21.0309]), tensor([0.1088, 0.0793]))
-        loc_mean_ = tar_locs.new_tensor([105.7804,  21.0309])
-        loc_std_ = tar_locs.new_tensor([0.1088, 0.0793])
-        tar_loc_embed = (tar_locs - loc_mean_) / loc_std_
+        new_air = torch.cat((air, self._forward_loc_em(air_locs)), dim=-1)
+        new_meteo = torch.cat((meteo, self._forward_loc_em(meteo_locs)), dim=-1)
 
-        gconv1_out = self._forward_gconv1(air, tar_loc_embed, air_locs, tar_locs)
-        gconv2_out = self._forward_gconv2(meteo, tar_loc_embed, meteo_locs, tar_locs)
+        with torch.no_grad():
+            tar_loc_embed = self._forward_loc_em(tar_locs)
+
+        gconv1_out = self._forward_gconv1(new_air, tar_loc_embed, air_locs, tar_locs)
+        gconv2_out = self._forward_gconv2(new_meteo, tar_loc_embed, meteo_locs, tar_locs)
 
         # gconv_out.shape == (batch_size, num_air_nodes, 2 * gcn_dim)
         gconv_out = torch.cat((gconv1_out, gconv2_out), dim=-1)
@@ -93,6 +92,16 @@ class AQFModel(BaseAQFModel):
         pred = self.fc(gconv_out)
 
         return pred
+    
+    def _forward_loc_em(self, locs: torch.Tensor):
+        # (tensor([105.7804,  21.0309]), tensor([0.1088, 0.0793]))
+        loc_mean_ = locs.new_tensor([105.7804,  21.0309])
+        loc_std_ = locs.new_tensor([0.1088, 0.0793])
+
+        loc_embed = (locs - loc_mean_) / loc_std_
+        # loc_embed = self.loc_embedding(loc_embed)
+
+        return loc_embed
 
     def _forward_gconv1(self, src_x: torch.Tensor, tar_x: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
         out = []

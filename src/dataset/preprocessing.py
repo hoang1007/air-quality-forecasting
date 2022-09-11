@@ -31,12 +31,12 @@ class DataPreprocessing:
 
         print('Done!')
 
-        # Handle Outliers
-        print('Handling Outliers . . .', end = ' ')
-        self.processing_feature = ['PM2.5', 'temperature', 'humidity']
-        self.process(self.data)
+        # # Handle Outliers
+        # print('Handling Outliers . . .', end = ' ')
+        # self.processing_feature = ['PM2.5', 'temperature', 'humidity']
+        # self.process(self.data)
 
-        print('Done!')
+        # print('Done!')
 
         # Save Data
         print('Saving Data . . .', end = ' ')
@@ -257,8 +257,8 @@ class DataPreprocessing:
             df.to_csv(save_path)
 
 if __name__ == '__main__':
-    # impute train data
-    data = DataPreprocessing(source_path = 'data-private/air', destination_path = 'data-private/', folder = 'air-full')
+    # # impute train data
+    # data = DataPreprocessing(source_path = 'data-private/air', destination_path = 'data-private/', folder = 'air-full')
 
     # impute test data
     root_test = "data-private/test"

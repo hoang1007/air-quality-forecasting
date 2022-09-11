@@ -30,13 +30,13 @@ def train(n_epochs: int, batch_size: int):
         # normalize_std={"humidity": 1, "temperature": 1, "PM2.5": 1},
         normalize_mean=cfg.data.normalize_mean,
         normalize_std=cfg.data.normalize_std,
-        train_ratio=0.75,
+        train_ratio=0.8,
         batch_size=batch_size
     )
 
-    ckpt = ModelCheckpoint(CKPT_DIR, filename="aqf", monitor="mae")
+    ckpt = ModelCheckpoint(CKPT_DIR, filename="aqf", monitor="mdape")
     lr_monitor = LearningRateMonitor("epoch")
-    logger = TensorBoardLogger(LOGDIR, name="aqf", version="e2e-v3", default_hp_metric=False)
+    logger = TensorBoardLogger(LOGDIR, name="aqf", version="e2e-+loc", default_hp_metric=False)
     trainer = pl.Trainer(
         logger=logger,
         max_epochs=n_epochs,
@@ -113,6 +113,6 @@ def submit():
 
 if __name__ == "__main__":
     torch.cuda.empty_cache()
-    # train(20, 8)
+    train(20, 8)
     # test()
-    submit()
+    # submit()

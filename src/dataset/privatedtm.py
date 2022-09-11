@@ -73,8 +73,8 @@ class PrivateDataset(Dataset):
         self.data_set = data_set
         self.inseq_len = 168
         self.outseq_len = 24
-        self.num_val_stations = 10
-        self.num_train_stations = 61
+        self.num_val_stations = 5
+        self.num_train_stations = 71 - self.num_val_stations
 
         if data_set in ("train", "val"):
             self.data = private_train_data(path.join(rootdir, "train"))
@@ -237,9 +237,13 @@ class PrivateDataset(Dataset):
         wind_spd = torch.tensor(wind_spd, dtype=torch.float32)
 
         press = torch.tensor(df["surface_pressure"].values, dtype=torch.float32)
-
+        evapo = torch.tensor(df["evaporation"].values, dtype=torch.float32)
+        total_preci = torch.tensor(df["total_precipitation"].values, dtype=torch.float32)
+      
         if norm:
             wind_spd = (wind_spd - self.mean_["wind_speed"]) / self.std_["wind_speed"]
             press = (press - self.mean_["surface_pressure"]) / self.std_["surface_pressure"]
-
-        return torch.stack((wind_spd, press), dim=-1)
+            evapo = (evapo - self.mean_["evaporation"]) / self.std_["evaporation"]
+            total_preci = (total_preci - self.mean_["total_precipitation"]) / self.std_["total_precipitation"]
+        return torch.stack((wind_spd, press, evapo, total_preci), dim=-1)
+        # return torch.stack((wind_spd, press), dim=-1)

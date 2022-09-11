@@ -1,7 +1,7 @@
 training:
   batch_size: 8
   num_air_features: 3 # humidity, temperature...
-  num_meteo_features: 2
+  num_meteo_features: 4
   
   outseq_len: 24
   src_len: 11 # số trạm đã biết
@@ -35,9 +35,13 @@ data:
     PM2.5: 48.219
     wind_speed: 2.332
     surface_pressure: 96957.127
+    evaporation: -0.00013613549437876813
+    total_precipitation: 0
   normalize_std:
     temperature: 6.098
     humidity: 16.169
     PM2.5: 55.535
     wind_speed: 1.9
     surface_pressure: 4101.496
+    evaporation: 0.00017662038446054475
+    total_precipitation: 1
