@@ -48,4 +48,5 @@ mode=test
 ```bash
 CID=$(docker run -d -v hblh:/app airqualityforecasting true)
 docker cp $CID:/app/submit ./
+docker rm $CID
 ```
