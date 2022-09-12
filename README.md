@@ -43,3 +43,9 @@ docker run -v hblh:/app --rm airqualityforecasting ++mode=test
 ```bash
 mode=test
 ```
+
+## Copy submit folder to local
+```bash
+CID=$(docker run -d -v hblh:/app busybox true)
+docker cp $CID:/app/submit ./
+```
