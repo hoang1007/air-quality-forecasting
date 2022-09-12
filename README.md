@@ -46,7 +46,6 @@ mode=test
 
 ## Copy submit folder to local
 ```bash
-CID=$(docker run -d -v hblh:/app busybox true)
+CID=$(docker run -d -v hblh:/app airqualityforecasting true)
 docker cp $CID:/app/submit ./
-docker rm $CID
 ```
