@@ -8,6 +8,17 @@ from dataset.raw_data import _read_stations, _read_locations
 
 
 def imputation(rootdir: str, method: str = "idw", **kwargs):
+    """
+    Filling the missing data.
+
+    Args:
+        rootdir: str. Path to the data's directory.
+        The directory's structure should contain a location csv file named `location.csv` or `location_input.csv`
+        and multiple csv file denote the data of stations needed to impute.
+
+    Note: Data in the csv files will be rewritten. Any sub-directory in the root directory will be ignored.
+    """
+
     try:
         loc_map = _read_locations(path.join(rootdir, "location.csv"))
     except:

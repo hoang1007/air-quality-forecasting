@@ -1,7 +1,5 @@
-pytorch-lightning
 torch-scatter
 torch-sparse
 torch-cluster
 torch-spline-conv
 torch-geometric
-matplotlib
