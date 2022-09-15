@@ -2,36 +2,6 @@ from typing import List
 import torch
 from torch import nn
 
-class MaskedLinear(nn.Module):
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
-        super().__init__()
-
-        w = torch.zeros(in_features, out_features)
-        nn.init.xavier_uniform_(w)
-        self.weight = nn.Parameter(w)
-
-        if bias:
-            b = torch.zeros(out_features)
-            nn.init.constant_(b, 0.0)
-            self.bias = nn.Parameter(b)
-        else:
-            self.bias = None
-
-    def forward(self, x: torch.Tensor, mask: torch.Tensor = None):
-        if mask is None:
-            out = torch.matmul(x, self.weight)
-        else:
-            out = []
-            for i in range(x.size(0)): # batch itr
-                out.append(torch.matmul(x[i], self.weight[mask[i]]))
-
-            out = torch.stack(out, dim=0)
-
-        if self.bias is not None:
-            out = out + self.bias
-        
-        return out
-
 
 class Conv1dExtractor(nn.Module):
     def __init__(self, config, n_features):

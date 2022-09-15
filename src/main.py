@@ -82,12 +82,14 @@ def test(cfg, device):
     )
 
 def prepare_data():
-    if not path.exists(DATADIR):
-        shutil.unpack_archive(os.path.join(ROOTDIR, "private-data.zip"), DATADIR)
-        # time.sleep(1) # wait for unzip data
+    if path.exists(DATADIR):
+        shutil.rmtree(DATADIR)
+
+    shutil.unpack_archive(os.path.join(ROOTDIR, "private-data.zip"), DATADIR)
+    print("Extracted data from zip file")
 
     # impute train data
-    imputation(os.path.join(DATADIR, "train/air"), method="idw")
+    imputation(os.path.join(DATADIR, "train/air"), method="idw", dist_type="euclidean", beta=1)
 
     for dirpath in os.scandir(os.path.join(DATADIR, "test")):
         imputation(dirpath.path, method="idw")

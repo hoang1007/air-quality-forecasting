@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from os import path
 from dataset.raw_data import _read_stations, _read_locations
+from utils.functional import euclidean_distance, haversine_distance
 
 
 def imputation(rootdir: str, method: str = "idw", **kwargs):
@@ -35,7 +36,8 @@ def imputation(rootdir: str, method: str = "idw", **kwargs):
     print("Overwirting data to " + rootdir)
     _save(rootdir, data)
 
-def idw_imputation(data: Dict, dist_threshold: float = float("inf"), beta: float = 0.1):
+
+def idw_imputation(data: Dict, dist_threshold: float = float("inf"), dist_type: str = "euclidean", beta: float = 1):
     with tqdm(data.items(), colour="green") as bar:
         for name_i, station in bar:
             df = station["data"]
@@ -48,7 +50,13 @@ def idw_imputation(data: Dict, dist_threshold: float = float("inf"), beta: float
                 if nan_ids.size > 0: # if contains NaN values
                     collected = tuple(([], []) for _ in range(nan_ids.size)) # list of tuple (value, dist)
                     for name_j in data.keys():
-                        dist = compute_eucilideance_distance(station["loc"], data[name_j]["loc"])
+                        if dist_type == 'haversine':
+                            dist = haversine_distance(station["loc"], data[name_j]["loc"])
+                        elif dist_type == 'euclidean':
+                            dist = euclidean_distance(station["loc"], data[name_j]["loc"])
+                        else:
+                            raise NotImplementedError(f"Dont't have {dist_type} distance")
+
                         if name_i != name_j and dist <= dist_threshold:
                             temp_df = data[name_j]["data"]
                             assert isinstance(temp_df, pd.DataFrame)
@@ -87,11 +95,6 @@ def _save(rootdir: str, data: Dict):
         df = station["data"]
         assert isinstance(df, pd.DataFrame)
         df.to_csv(filepath, index=False)
-
-def compute_eucilideance_distance(loc1: Tuple[float, float], loc2: Tuple[float, float]):
-    k = (loc1[0] - loc2[0]) ** 2 + (loc1[1] - loc2[1]) ** 2
-
-    return math.sqrt(k)
 
 if __name__ == '__main__':
     imputation("/home/hoang/Documents/CodeSpace/air-quality-forecasting/private-data/train/air", method="idw", dist_threshold=1000, beta=1.0)

@@ -4,47 +4,41 @@ from datetime import datetime, timedelta
 import math
 
 
-def euclidean_distances(
-        src_locs: torch.Tensor,
-        tar_locs: torch.Tensor):
-
-    assert len(src_locs.shape) == 3 and len(tar_locs.shape) == 3,\
-        "locs must be of shape [batch_size, N, 2]"
-
-    deltas = src_locs.unsqueeze(2) - tar_locs.unsqueeze(1)
-    dists = deltas.pow(2).sum(dim=-1).sqrt()
-
-    return dists
-
-
-def inverse_distance_weighted(
-        src_locs: torch.Tensor,
-        tar_locs: torch.Tensor,
-        beta: float,
-        eps: float = 1e-8):
+def euclidean_distance(loc1, loc2):
     """
-    Compute inverse distance weighted
-
-    Args:
-        src_locs: Tensor (batch_size, N, 2)
-        tar_locs: Tensor (batch_size, M, 2)
-        beta: Controlling factor. Float
-        eps: smoothing computation factor
-
-    Returns:
-        weights: Tensor (batch_size, N, M)
+    Computes the Euclidean distance between two locations.
+    :param loc1: Tuple (2) (longitude, latitude)
+    :param loc2: Tuple (2) (longitude, latitude)
+    :return distance: float
     """
 
-    assert len(src_locs.shape) == 3 and len(tar_locs.shape) == 3,\
-        "locs must be of shape [batch_size, N, 2]"
+    sqr_delta = (loc1[0] - loc2[0]) ** 2 + (loc1[1] - loc2[1]) ** 2
 
-    # dists.shape == (batch_size, N, M)
-    dists = euclidean_distances(src_locs, tar_locs)
+    return math.sqrt(sqr_delta)
 
-    weights = torch.pow(dists + eps, -beta)
-    weights = weights / weights.sum(1, keepdim=True)
 
-    return weights
+def haversine_distance(loc1, loc2, radius: float = 6371):
+    """
+    Computes the Euclidean distance between two locations.
+    :param loc1: Tuple (2) (longitude, latitude)
+    :param loc2: Tuple (2) (longitude, latitude)
+    :param radius: float. Default is radius of the Earth (6371 km)
+
+    :return distance: float. Km unit
+    """
+
+    delta_lon = (loc1[0] - loc2[0]) * math.pi / 180
+    delta_lat = (loc1[1] - loc2[1]) * math.pi / 180
+
+    lat1_rad = loc1[1] * math.pi / 180
+    lat2_rad = loc2[1] * math.pi / 180
+
+    a = math.sin(delta_lat / 2) ** 2 + \
+                math.sin(delta_lon / 2) ** 2 * math.cos(lat1_rad) * math.cos(lat2_rad)
+
+    dist = 2 * math.asin(math.sqrt(a)) * radius
+
+    return dist
 
 
 def get_solar_term(date: datetime):
@@ -115,18 +109,6 @@ def get_solar_term(date: datetime):
         return DAI_HAN
     else:
         raise ValueError
-
-
-def get_next_period(date: datetime, len: int) -> List[datetime]:
-    delta = timedelta(hours=1)
-
-    out = []
-    for i in range(len):
-        next = date + delta
-
-        out.append(next)
-
-    return out
 
 
 def extract_wind(u: List[float], v: List[float]):
