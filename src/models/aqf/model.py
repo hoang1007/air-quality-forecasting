@@ -127,7 +127,6 @@ class AQFModel(BaseAQFModel):
             edge_weights, edge_ids = inverse_distance_weighting(
                 src_locs[batch_idx],
                 tar_locs[batch_idx],
-                dist_thresh=0.8,
                 dist_thresh=self.dist_thresh_meteo,
                 dist_type=self.dist_type,
                 norm=True
