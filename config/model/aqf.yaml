@@ -12,6 +12,10 @@ training:
   gcn_dim: 32
   dropout: 0.2
 
+  dist_type: "haversine"
+  dist_thresh_air: 20
+  dist_thresh_meteo: 150
+
   optim:
     lr: 0.001
     optimizer: "adam"

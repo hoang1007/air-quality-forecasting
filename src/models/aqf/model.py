@@ -11,6 +11,9 @@ class AQFModel(BaseAQFModel):
         super().__init__(config, target_normalize_mean, target_normalize_std)
 
         self.loc_dim = 2
+        self.dist_thresh_air = config["dist_thresh_air"]
+        self.dist_thresh_meteo = config["dist_thresh_meteo"]
+        self.dist_type = config["dist_type"]
 
         self.air_extractor = nn.GRU(
             input_size=config["num_air_features"],
@@ -104,7 +107,12 @@ class AQFModel(BaseAQFModel):
         out = []
         for batch_idx in range(src_x.size(0)):
             edge_weights, edge_ids = inverse_distance_weighting(
-                src_locs[batch_idx], tar_locs[batch_idx], dist_thresh=0.3, norm=False)
+                src_locs[batch_idx],
+                tar_locs[batch_idx],
+                dist_thresh=self.dist_thresh_air,
+                dist_type=self.dist_type,
+                norm=True
+            )
 
             temp = self.gconv1(
                 (src_x[batch_idx], tar_x[batch_idx]), edge_ids, edge_weights)
@@ -117,7 +125,13 @@ class AQFModel(BaseAQFModel):
         out = []
         for batch_idx in range(src_x.size(0)):
             edge_weights, edge_ids = inverse_distance_weighting(
-                src_locs[batch_idx], tar_locs[batch_idx], dist_thresh=0.8, norm=False)
+                src_locs[batch_idx],
+                tar_locs[batch_idx],
+                dist_thresh=0.8,
+                dist_thresh=self.dist_thresh_meteo,
+                dist_type=self.dist_type,
+                norm=True
+            )
 
             temp = self.gconv2(
                 (src_x[batch_idx], tar_x[batch_idx]), edge_ids, edge_weights)
