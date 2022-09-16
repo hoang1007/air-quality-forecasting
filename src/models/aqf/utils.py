@@ -1,4 +1,5 @@
 import torch
+import math
 from utils.functional import euclidean_distance, haversine_distance
 
 
@@ -52,7 +53,7 @@ def _self_weighting(locs: torch.Tensor, beta: float, dist_thresh: float, dist_ty
                 if dist_thresh is not None and dist > dist_thresh:
                     continue
 
-                row_w.append(torch.pow(dist, -beta))
+                row_w.append(math.pow(dist, -beta))
                 ids.append(locs.new_tensor([i, j], dtype=torch.long))
         row_w = locs.new_tensor(row_w, dtype=torch.float32)  # shape (V)
         if norm:
@@ -83,7 +84,7 @@ def _pairwise_weighting(loc1: torch.Tensor, loc2: torch.Tensor, beta: float, dis
             if dist_thresh is not None and dist > dist_thresh:
                 continue
 
-            row_w.append(torch.pow(dist, -beta))
+            row_w.append(math.pow(dist, -beta))
             ids.append(loc1.new_tensor([i, j], dtype=torch.long))
         row_w = loc1.new_tensor(row_w, dtype=torch.float32)  # shape (V)
         if norm:
