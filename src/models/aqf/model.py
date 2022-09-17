@@ -15,23 +15,44 @@ class AQFModel(BaseAQFModel):
         self.dist_thresh_meteo = config["dist_thresh_meteo"]
         self.dist_type = config["dist_type"]
 
-        self.air_extractor = nn.GRU(
-            input_size=config["num_air_features"],
-            hidden_size=config["hidden_size"],
-            num_layers=config["num_extractor_layers"],
-            batch_first=True,
-            dropout=config["dropout"],
-            bidirectional=True
-        )
+        if config["extractor"] == "gru":
+            self.air_extractor = nn.GRU(
+                input_size=config["num_air_features"],
+                hidden_size=config["hidden_size"],
+                num_layers=config["num_extractor_layers"],
+                batch_first=True,
+                dropout=config["dropout"],
+                bidirectional=config["bidirectional"]
+            )
 
-        self.meteo_extractor = nn.GRU(
-            input_size=config["num_meteo_features"],
-            hidden_size=config["hidden_size"],
-            num_layers=config["num_extractor_layers"],
-            batch_first=True,
-            dropout=config["dropout"],
-            bidirectional=True
-        )
+            self.meteo_extractor = nn.GRU(
+                input_size=config["num_meteo_features"],
+                hidden_size=config["hidden_size"],
+                num_layers=config["num_extractor_layers"],
+                batch_first=True,
+                dropout=config["dropout"],
+                bidirectional=config["bidirectional"]
+            )
+        elif config["extractor"] == "lstm":
+            self.air_extractor = nn.LSTM(
+                input_size=config["num_air_features"],
+                hidden_size=config["hidden_size"],
+                num_layers=config["num_extractor_layers"],
+                batch_first=True,
+                dropout=config["dropout"],
+                bidirectional=config["bidirectional"]
+            )
+
+            self.meteo_extractor = nn.LSTM(
+                input_size=config["num_meteo_features"],
+                hidden_size=config["hidden_size"],
+                num_layers=config["num_extractor_layers"],
+                batch_first=True,
+                dropout=config["dropout"],
+                bidirectional=config["bidirectional"]
+            )
+        else:
+            raise ValueError(f"Unknown extractor: {config['extractor']}")
 
         self.gconv1 = GraphConv(
             (config["hidden_size"] * 2, self.loc_dim),

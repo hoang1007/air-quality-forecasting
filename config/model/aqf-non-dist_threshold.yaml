@@ -15,8 +15,8 @@ training:
   dropout: 0.2
 
   dist_type: "haversine"
-  dist_thresh_air: 20
-  dist_thresh_meteo: 150
+  dist_thresh_air: .inf
+  dist_thresh_meteo: .inf
 
   optim:
     lr: 0.001

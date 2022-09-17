@@ -8,7 +8,7 @@ training:
   src_len: 11 # số trạm đã biết
   
   hidden_size: 16
-  extractor: "gru"
+  extractor: "lstm"
   num_extractor_layers: 2
   bidirectional: True
   gcn_dim: 32

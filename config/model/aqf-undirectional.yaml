@@ -10,7 +10,7 @@ training:
   hidden_size: 16
   extractor: "gru"
   num_extractor_layers: 2
-  bidirectional: True
+  bidirectional: False
   gcn_dim: 32
   dropout: 0.2
 
