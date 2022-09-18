@@ -28,8 +28,6 @@ class PrivateDataModule(LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         split_ids = self._split_train_val(self.train_ratio)
 
-        print(split_ids)
-
         self.data_train = PrivateDataset(
             self.rootdir,
             self.normalize_mean,
