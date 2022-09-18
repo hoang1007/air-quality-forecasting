@@ -28,6 +28,8 @@ class PrivateDataModule(LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         split_ids = self._split_train_val(self.train_ratio)
 
+        print(split_ids)
+
         self.data_train = PrivateDataset(
             self.rootdir,
             self.normalize_mean,
@@ -48,7 +50,7 @@ class PrivateDataModule(LightningDataModule):
         total_len = 243
         train_size = int(total_len * train_ratio)
 
-        perm_ids = torch.randperm(total_len)
+        perm_ids = torch.randperm(total_len, generator=torch.Generator().manual_seed(3107)) # consistent
 
         return perm_ids[:train_size], perm_ids[train_size:]
 
@@ -73,8 +75,10 @@ class PrivateDataset(Dataset):
         self.data_set = data_set
         self.inseq_len = 168
         self.outseq_len = 24
+
+        self.num_stations = 71
         self.num_val_stations = 5
-        self.num_train_stations = 71 - self.num_val_stations
+        self.num_train_stations = self.num_stations - self.num_val_stations
 
         if data_set in ("train", "val"):
             self.data = private_train_data(path.join(rootdir, "train"))
