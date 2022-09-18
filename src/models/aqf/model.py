@@ -55,13 +55,13 @@ class AQFModel(BaseAQFModel):
             raise ValueError(f"Unknown extractor: {config['extractor']}")
 
         self.gconv1 = GraphConv(
-            (config["hidden_size"] * 2, self.loc_dim),
+            (config["hidden_size"] * 2 if config["bidirectional"] else 1, self.loc_dim),
             config["gcn_dim"],
             aggr="mean"
         )
 
         self.gconv2 = GraphConv(
-            (config["hidden_size"] * 2, self.loc_dim),
+            (config["hidden_size"] * 2 if config["bidirectional"] else 1, self.loc_dim),
             config["gcn_dim"],
             aggr="mean"
         )
