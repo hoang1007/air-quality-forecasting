@@ -75,7 +75,7 @@ class PrivateDataset(Dataset):
         self.outseq_len = 24
 
         self.num_stations = 71
-        self.num_val_stations = 5
+        self.num_val_stations = 10
         self.num_train_stations = self.num_stations - self.num_val_stations
 
         if data_set in ("train", "val"):
