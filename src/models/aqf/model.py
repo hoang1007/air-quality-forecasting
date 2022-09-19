@@ -142,8 +142,10 @@ class AQFModel(BaseAQFModel):
 
         src_x, tar_x, edge_ids, edge_weights = self._batch_gconv_input(src_x, tar_x, edge_ids, edge_weights)
 
-        out = self.gconv1(
-            (src_x, tar_x), edge_ids, edge_weights)
+        # out = self.gconv1(
+        #     (src_x, tar_x), edge_ids, edge_weights)
+
+        out = self.gconv1((src_x, tar_x), edge_ids)
         out = out.view(batch_size, -1, out.size(-1))
         return out
 
@@ -165,8 +167,10 @@ class AQFModel(BaseAQFModel):
 
         src_x, tar_x, edge_ids, edge_weights = self._batch_gconv_input(src_x, tar_x, edge_ids, edge_weights)
 
-        out = self.gconv2(
-            (src_x, tar_x), edge_ids, edge_weights)
+        # out = self.gconv2(
+        #     (src_x, tar_x), edge_ids, edge_weights)
+
+        out = self.gconv2((src_x, tar_x), edge_ids)
         out = out.view(batch_size, -1, out.size(-1))
 
         return out
