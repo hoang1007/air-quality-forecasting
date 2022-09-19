@@ -17,8 +17,9 @@ class MultiMetrics:
         self._flattened = flattened
 
     def __call__(self, y_pred: torch.Tensor, y_true: torch.Tensor):
-        y_pred = y_pred.reshape(y_pred.size(0), -1)
-        y_true = y_true.reshape_as(y_pred)
+        if not self._flattened:
+            y_pred = y_pred.reshape(y_pred.size(0), -1)
+            y_true = y_true.reshape_as(y_pred)
         
         return {
             "mdape": mdape(y_pred, y_true).item(),

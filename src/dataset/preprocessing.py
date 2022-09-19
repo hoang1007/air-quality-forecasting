@@ -30,12 +30,43 @@ def imputation(rootdir: str, method: str = "idw", **kwargs):
     print("Filling missing data")
     if method == "idw":
         data = idw_imputation(data, **kwargs)
+    elif method == "spline":
+        data = spline_imputation(data, **kwargs)
+    elif method == "median":
+        data = median_imputation(data, **kwargs)
     else:
         raise NotImplementedError
 
-    print("Overwirting data to " + rootdir)
+    print("Overwriting data to " + rootdir)
     _save(rootdir, data)
 
+
+def spline_imputation(data: Dict):
+    with tqdm(data.items(), colour="green") as bar:
+        for name_i, station in bar:
+            df = station["data"]
+            assert isinstance(df, pd.DataFrame)
+
+            # numeric_df = df.select_dtypes(include=np.number)
+            # numeric_df.interpolate(method="spline", axis="columns", inplace=True)
+            for col in df.columns:
+                if df[col].dtype == np.number:
+                    df[col].interpolate(option="spline", inplace=True)
+                    df[col].bfill(inplace=True)
+    
+    return data
+
+def median_imputation(data: Dict):
+    with tqdm(data.items(), colour="green") as bar:
+        for name_i, station in bar:
+            df = station["data"]
+            assert isinstance(df, pd.DataFrame)
+
+            for col in df.columns:
+                if df[col].dtype == np.number:
+                    df[col].fillna(value=df[col].median(skipna=True), inplace=True)
+
+    return data
 
 def idw_imputation(data: Dict, dist_threshold: float = float("inf"), dist_type: str = "euclidean", beta: float = 1):
     with tqdm(data.items(), colour="green") as bar:
