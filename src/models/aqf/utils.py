@@ -3,33 +3,70 @@ import math
 from utils.functional import euclidean_distance, haversine_distance
 
 
+# def inverse_distance_weighting(
+#     loc1: torch.Tensor, loc2: torch.Tensor = None,
+#     dist_thresh: float = None,
+#     dist_type: str = "euclidean",
+#     beta: float = 1,
+#     norm: bool = False
+# ):
+#     """
+#     Args:
+#         loc1: (num_loc1, 2)
+#         loc2: (num_loc2, 2)
+#         dist_thresh: if the distance between two locations is greater than the threshold, it will be ignored.
+#         dist_type: Euclidean distance or Haversine distance
+#         beta: Inverse Distance weighting factor
+#         norm: If True, the normalized distance is used.
+
+#     Returns:
+#         weights: (E)
+#         ids: (2, E)
+#     """
+
+#     if loc2 is None:
+#         weights, ids = _self_weighting(
+#             loc1, beta=beta, dist_thresh=dist_thresh, norm=norm, dist_type=dist_type)
+#     else:
+#         weights, ids = _pairwise_weighting(
+#             loc1, loc2, beta=beta, dist_thresh=dist_thresh, norm=norm, dist_type=dist_type)
+
+#     return weights, ids
 def inverse_distance_weighting(
-    loc1: torch.Tensor, loc2: torch.Tensor = None,
-    dist_thresh: float = None,
+    src: torch.Tensor,
+    dst: torch.Tensor,
+    beta: float = 1.0,
+    dist_thresh: float = float("inf"),
     dist_type: str = "euclidean",
-    beta: float = 1,
     norm: bool = False
 ):
-    """
-    Args:
-        loc1: (num_loc1, 2)
-        loc2: (num_loc2, 2)
-        dist_thresh: if the distance between two locations is greater than the threshold, it will be ignored.
-        dist_type: Euclidean distance or Haversine distance
-        beta: Inverse Distance weighting factor
-        norm: If True, the normalized distance is used.
+    weights, ids = dst.new_tensor([]), []
+    num_src_nodes = src.size(0)
+    num_dst_nodes = dst.size(0)
 
-    Returns:
-        weights: (E)
-        ids: (2, E)
-    """
+    for i in range(num_dst_nodes):
+        row_w = []
+        for j in range(num_src_nodes):
+            if dist_type == 'haversine':
+                dist = haversine_distance(src[j], dst[i])
+            elif dist_type == 'euclidean':
+                dist = euclidean_distance(src[j], dst[i])
+            else:
+                raise NotImplementedError(f"Don't have {dist_type} distance")
+            
+            if dist_thresh is not None and dist > dist_thresh:
+                continue
+            
+            row_w.append(math.pow(dist, -beta))
+            ids.append(dst.new_tensor((j, i), dtype=torch.long))
+        row_w = dst.new_tensor(row_w, dtype=torch.float32)  # shape (V)
 
-    if loc2 is None:
-        weights, ids = _self_weighting(
-            loc1, beta=beta, dist_thresh=dist_thresh, norm=norm, dist_type=dist_type)
-    else:
-        weights, ids = _pairwise_weighting(
-            loc1, loc2, beta=beta, dist_thresh=dist_thresh, norm=norm, dist_type=dist_type)
+        if norm:
+            row_w = row_w / row_w.sum()
+        
+        weights = torch.hstack((weights, row_w))
+    
+    ids = torch.stack(ids, dim=-1)
 
     return weights, ids
 
