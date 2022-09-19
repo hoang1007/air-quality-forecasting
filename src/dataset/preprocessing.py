@@ -81,23 +81,24 @@ def idw_imputation(data: Dict, dist_threshold: float = float("inf"), dist_type: 
                 if nan_ids.size > 0: # if contains NaN values
                     collected = tuple(([], []) for _ in range(nan_ids.size)) # list of tuple (value, dist)
                     for name_j in data.keys():
-                        if dist_type == 'haversine':
-                            dist = haversine_distance(station["loc"], data[name_j]["loc"])
-                        elif dist_type == 'euclidean':
-                            dist = euclidean_distance(station["loc"], data[name_j]["loc"])
-                        else:
-                            raise NotImplementedError(f"Dont't have {dist_type} distance")
+                        if name_i != name_j:
+                            if dist_type == 'haversine':
+                                dist = haversine_distance(station["loc"], data[name_j]["loc"])
+                            elif dist_type == 'euclidean':
+                                dist = euclidean_distance(station["loc"], data[name_j]["loc"])
+                            else:
+                                raise NotImplementedError(f"Dont't have {dist_type} distance")
 
-                        if name_i != name_j and dist <= dist_threshold:
-                            temp_df = data[name_j]["data"]
-                            assert isinstance(temp_df, pd.DataFrame)
+                            if dist <= dist_threshold:
+                                temp_df = data[name_j]["data"]
+                                assert isinstance(temp_df, pd.DataFrame)
 
-                            # find possible values to impute
-                            for i in range(nan_ids.size):
-                                val = temp_df[col].iloc[i]
-                                if not math.isnan(val):
-                                    collected[i][0].append(val)
-                                    collected[i][1].append(dist)
+                                # find possible values to impute
+                                for i in range(nan_ids.size):
+                                    val = temp_df[col].iloc[i]
+                                    if not math.isnan(val):
+                                        collected[i][0].append(val)
+                                        collected[i][1].append(dist)
 
                     # impute nan values
                     for i in range(nan_ids.size):

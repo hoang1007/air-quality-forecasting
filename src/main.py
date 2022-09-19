@@ -36,7 +36,7 @@ def train(cfg, device):
         batch_size=cfg.training.batch_size
     )
 
-    logger = TensorBoardLogger(LOGDIR, name="aqf-base", version="v1")
+    logger = TensorBoardLogger(LOGDIR, name="aqf-batch-support", version="v1")
 
     ckpt = ModelCheckpoint(
         dirpath=CKPT_DIR,
@@ -89,15 +89,16 @@ def prepare_data():
     print("Extracted data from zip file")
 
     # impute train data
-    imputation(os.path.join(DATADIR, "train/air"), method="idw", dist_type="euclidean", beta=1)
+    imputation(os.path.join(DATADIR, "train/air"), method="spline")
 
-    for dirpath in os.scandir(os.path.join(DATADIR, "test")):
-        imputation(dirpath.path, method="idw")
+    # for dirpath in os.scandir(os.path.join(DATADIR, "test")):
+    #     imputation(dirpath.path, method="spline")
 
 @hydra.main(config_path="../config", config_name="config", version_base=None)
 def run(cfg):
     pl.seed_everything(3107)
 
+    print(cfg)
     if cfg.mode == "train":
         train(cfg.model, cfg.device)
     elif cfg.mode == "test":

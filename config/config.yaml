@@ -1,5 +1,9 @@
 defaults:
-  - _self_
   - model: aqf
-mode: test # Chạy train hoặc test
+  - _self_
+mode: train # Chạy train hoặc test
 device: gpu # gpu hoặc cpu
+
+model:
+  training:
+    epochs: 20

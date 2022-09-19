@@ -125,9 +125,11 @@ class AQFModel(BaseAQFModel):
         return loc_embed
 
     def _forward_gconv1(self, src_x: torch.Tensor, tar_x: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
-        out = []
-        for batch_idx in range(src_x.size(0)):
-            edge_weights, edge_ids = inverse_distance_weighting(
+        batch_size = src_x.size(0)
+        edge_weights, edge_ids = [], []
+
+        for batch_idx in range(batch_size):
+            temp_w, temp_idx = inverse_distance_weighting(
                 src_locs[batch_idx],
                 tar_locs[batch_idx],
                 dist_thresh=self.dist_thresh_air,
@@ -135,17 +137,22 @@ class AQFModel(BaseAQFModel):
                 norm=True
             )
 
-            temp = self.gconv1(
-                (src_x[batch_idx], tar_x[batch_idx]), edge_ids, edge_weights)
+            edge_weights.append(temp_w)
+            edge_ids.append(temp_idx)
 
-            out.append(temp)
+        src_x, tar_x, edge_ids, edge_weights = self._batch_gconv_input(src_x, tar_x, edge_ids, edge_weights)
 
-        return torch.stack(out, dim=0)
+        out = self.gconv1(
+            (src_x, tar_x), edge_ids, edge_weights)
+        out = out.view(batch_size, -1, out.size(-1))
+        return out
 
     def _forward_gconv2(self, src_x: torch.Tensor, tar_x: torch.Tensor, src_locs: torch.Tensor, tar_locs: torch.Tensor):
-        out = []
+        batch_size = src_x.size(0)
+        edge_weights, edge_ids = [], []
+
         for batch_idx in range(src_x.size(0)):
-            edge_weights, edge_ids = inverse_distance_weighting(
+            temp_w, temp_idx = inverse_distance_weighting(
                 src_locs[batch_idx],
                 tar_locs[batch_idx],
                 dist_thresh=self.dist_thresh_meteo,
@@ -153,12 +160,38 @@ class AQFModel(BaseAQFModel):
                 norm=True
             )
 
-            temp = self.gconv2(
-                (src_x[batch_idx], tar_x[batch_idx]), edge_ids, edge_weights)
+            edge_weights.append(temp_w)
+            edge_ids.append(temp_idx)
 
-            out.append(temp)
+        src_x, tar_x, edge_ids, edge_weights = self._batch_gconv_input(src_x, tar_x, edge_ids, edge_weights)
 
-        return torch.stack(out, dim=0)
+        out = self.gconv2(
+            (src_x, tar_x), edge_ids, edge_weights)
+        out = out.view(batch_size, -1, out.size(-1))
+
+        return out
+
+    def _batch_gconv_input(self, src_x: torch.Tensor, tar_x: torch.Tensor, edge_ids: torch.Tensor, edge_weights: torch.Tensor):
+        """
+        Args:
+            src_x: Tensor (batch_size, n1, num_features)
+            tar_x: Tensor (batch_size, n2, num_features)
+            edge_ids: List of (2, num_edges)
+            edge_weights: List of (num_edges)
+        """
+
+        num_nodes = torch.tensor((src_x.size(1), tar_x.size(1)), dtype=torch.long, device=src_x.device).unsqueeze(-1)
+
+        src_x = src_x.view(-1, src_x.size(-1))
+        tar_x = tar_x.view(-1, tar_x.size(-1))
+
+        for i in range(len(edge_ids)): # batch
+            edge_ids[i] = edge_ids[i] + i * num_nodes
+
+        edge_weights = torch.hstack(edge_weights)
+        edge_ids = torch.cat(edge_ids, dim=1)
+
+        return src_x, tar_x, edge_ids, edge_weights
 
     def compute_loss(self, input: torch.Tensor, target: torch.Tensor):
         return F.l1_loss(input, target)
