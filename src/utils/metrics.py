@@ -13,13 +13,15 @@ class MultiMetrics:
     Returns:
         outputs (Dict[float]): Các điểm `mae`, `mape`, `rmse`, `r2`, `mdape`
     '''
-    def __init__(self, flattened: bool = True):
+    def __init__(self, flattened: bool = False):
         self._flattened = flattened
 
     def __call__(self, y_pred: torch.Tensor, y_true: torch.Tensor):
         if not self._flattened:
             y_pred = y_pred.reshape(y_pred.size(0), -1)
             y_true = y_true.reshape_as(y_pred)
+        else:
+            assert len(y_pred.shape) == 1, "not flattened"
         
         return {
             "mdape": mdape(y_pred, y_true).item(),
