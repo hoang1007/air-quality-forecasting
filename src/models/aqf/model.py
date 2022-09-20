@@ -134,7 +134,7 @@ class AQFModel(BaseAQFModel):
                 tar_locs[batch_idx],
                 dist_thresh=self.dist_thresh_air,
                 dist_type=self.dist_type,
-                norm=True
+                norm=False
             )
 
             edge_weights.append(temp_w)
@@ -159,7 +159,7 @@ class AQFModel(BaseAQFModel):
                 tar_locs[batch_idx],
                 dist_thresh=self.dist_thresh_meteo,
                 dist_type=self.dist_type,
-                norm=True
+                norm=False
             )
 
             edge_weights.append(temp_w)

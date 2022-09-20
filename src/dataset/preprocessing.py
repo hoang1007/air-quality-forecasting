@@ -30,6 +30,7 @@ def imputation(rootdir: str, method: str = "idw", **kwargs):
     print("Filling missing data")
     if method == "idw":
         data = idw_imputation(data, **kwargs)
+        data = spline_imputation(data)
     elif method == "spline":
         data = spline_imputation(data, **kwargs)
     elif method == "median":
@@ -68,7 +69,7 @@ def median_imputation(data: Dict):
 
     return data
 
-def idw_imputation(data: Dict, dist_threshold: float = float("inf"), dist_type: str = "euclidean", beta: float = 1):
+def idw_imputation(data: Dict, n_contributor: int = 10, dist_threshold: float = float("inf"), dist_type: str = "euclidean", beta: float = 1):
     with tqdm(data.items(), colour="green") as bar:
         for name_i, station in bar:
             df = station["data"]
@@ -103,6 +104,10 @@ def idw_imputation(data: Dict, dist_threshold: float = float("inf"), dist_type: 
                     # impute nan values
                     for i in range(nan_ids.size):
                         values, dists = collected[i]
+
+                        if len(values) < n_contributor: # not enough values to impute
+                            continue
+
                         values = np.array(values)
                         dists = np.array(dists)
 

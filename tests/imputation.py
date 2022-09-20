@@ -35,14 +35,15 @@ class ImputationDataset:
             nna_ids = np.argwhere(seq.notna().values).squeeze(-1)
             # keep_num = min(len(nna_ids), int(len(seq) * mask_ratio))
             keep_num = int(len(nna_ids) * mask_ratio)
-            nna_ids = self._random_choice(nna_ids, keep_num)
+            nna_ids = self._random_choice(nna_ids, keep_num, self.max_seq_len)
 
             labels[st_name] = (
                 nna_ids,
                 seq.values[nna_ids]
             )
 
-            seq.replace(to_replace=nna_ids, value=np.nan, inplace=True)
+            for idx in nna_ids:
+                seq.at[idx] = np.nan
         
         return raw_data, labels
 
@@ -53,12 +54,13 @@ class ImputationDataset:
 
         return pd.DataFrame(summary, index=[0])
 
-    def _random_choice(self, seq: np.ndarray, num: int):
+    @staticmethod
+    def _random_choice(seq: np.ndarray, num: int, max_seq_len: int):
         # keep_ids = np.random.permutation(len(seq))[:num]
 
         # seq = seq[keep_ids]
         # return seq
-        group_ids = self._random_group(num, max_seq_len=self.max_seq_len)
+        group_ids = ImputationDataset._random_group(num, max_seq_len=max_seq_len)
         increment_vec = np.array([0] + group_ids)
 
         for i in range(1, len(increment_vec)):
@@ -86,8 +88,8 @@ class ImputationDataset:
 
         return seq[chosen_ids]
 
-
-    def _random_group(self, n: int, max_seq_len: int):
+    @staticmethod
+    def _random_group(n: int, max_seq_len: int):
         """
         Random group
         """
@@ -121,13 +123,20 @@ class ImputationDataset:
 
 
 if __name__ == "__main__":
+    # out = ImputationDataset._random_choice(
+    #     torch.arange(100),
+    #     50,
+    #     max_seq_len=20
+    # )
+
+    # print(out)
     data, labels = ImputationDataset(
-        max_seq_len=200,
+        max_seq_len=1000,
         extract_dir="./data",
         archive_path="private-data.zip"
-    ).get_dataset(mask_ratio=0.5)
+    ).get_dataset(mask_ratio=0.4)
 
-    # filled_data = idw_imputation(data, dist_type="haversine", dist_threshold=20)
+    filled_data = idw_imputation(data, dist_type="haversine", n_contributor=5)
     filled_data = spline_imputation(data)
     # filled_data = median_imputation(data)
 
