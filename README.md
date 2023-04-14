@@ -1,4 +1,4 @@
-# air-quality-forecasting
+# 3rd Place submission to AI4VN - Air Quality Forecasting Challenge 
 
 ## Notes:
 
